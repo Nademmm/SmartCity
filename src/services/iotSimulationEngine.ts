@@ -215,6 +215,20 @@ export const INITIAL_AIR_QUALITY: AirQualityData = {
 
 export const INITIAL_IOT_DEVICES: IoTDevice[] = [
   {
+    id: 'YOLO-CV-TRAFFIC-01',
+    name: 'YOLO11 Computer Vision Traffic Cam',
+    type: 'Traffic Sensor',
+    location: 'Simpang Bundaran Merdeka (Camera Stream)',
+    status: 'Online',
+    signalRssi: 100,
+    isMainsPowered: true,
+    lastPing: 'Live Vision Stream',
+    ipAddress: '127.0.0.1 / RTSP Stream',
+    mqttTopic: 'urbanpulse/traffic/yolo-vision',
+    firmwareVersion: 'v11.0.0-ultralytics',
+    coordinates: { x: 28, y: 35 },
+  },
+  {
     id: 'ESP32-001',
     name: 'ESP32 Traffic AI Cam Node A',
     type: 'Traffic Sensor',

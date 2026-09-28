@@ -661,23 +661,49 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
           );
         }
 
-        // 3. Cek Lalu Lintas Real
+        // 3. Cek Lalu Lintas Real (ESP32 & YOLO11 Computer Vision Stream)
         if (data.latestBySubsystem['traffic']) {
           const traffic = data.latestBySubsystem['traffic'];
-          const targetId = traffic.intersectionId || 'int-1';
+          const targetId = traffic.intersectionId || 'TRF-01';
           setIntersections((prev) =>
             prev.map((it) => {
-              if (it.id === targetId) {
+              if (it.id === targetId || (targetId === 'int-1' && it.id === 'TRF-01') || (it.id === 'TRF-01' && traffic.deviceId === 'YOLO-CV-TRAFFIC-01')) {
+                const density = traffic.payload.density ?? it.density;
+                let statusText: 'LANCAR' | 'SEDANG' | 'PADAT' | 'MACET TOTAL' = 'LANCAR';
+                if (traffic.payload.statusText) {
+                  const st = traffic.payload.statusText.toUpperCase();
+                  if (st.includes('MACET')) statusText = 'MACET TOTAL';
+                  else if (st.includes('SEDANG') || st.includes('RAMAI')) statusText = 'SEDANG';
+                  else if (st.includes('PADAT')) statusText = 'PADAT';
+                  else statusText = 'LANCAR';
+                } else {
+                  if (density >= 75) statusText = 'MACET TOTAL';
+                  else if (density >= 60) statusText = 'PADAT';
+                  else if (density >= 35) statusText = 'SEDANG';
+                  else statusText = 'LANCAR';
+                }
+
                 return {
                   ...it,
-                  density: traffic.payload.density ?? it.density,
+                  density: density,
                   vehicleCount: traffic.payload.vehicleCount ?? it.vehicleCount,
-                  avgSpeedKmh: traffic.payload.avgSpeedKmh ?? it.avgSpeedKmh,
+                  avgSpeedKmh: traffic.payload.avgSpeedKmh ?? (density > 70 ? 14 : density > 40 ? 32 : 50),
                   currentLight: traffic.payload.currentLight ?? it.currentLight,
+                  statusText,
+                  queueLengthMeters: traffic.payload.queueLengthMeters ?? Math.round(density * 1.4),
                 };
               }
               return it;
             })
+          );
+
+          // Update status device YOLO-CV-TRAFFIC-01 & sensor traffic
+          setDevices((prev) =>
+            prev.map((d) =>
+              d.id === traffic.deviceId || (d.id === 'YOLO-CV-TRAFFIC-01' && traffic.type === 'traffic')
+                ? { ...d, status: 'Online', lastPing: 'Baru saja (YOLO11 Live Stream)' }
+                : d
+            )
           );
         }
       } catch (err) {

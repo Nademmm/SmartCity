@@ -14,6 +14,8 @@ import {
   Siren,
   ShieldCheck,
   CheckCircle2,
+  Video,
+  Radio,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -111,6 +113,72 @@ export const TrafficView: React.FC = () => {
             />
           </button>
         ))}
+      </div>
+
+      {/* YOLO11 Computer Vision Live Stream Banner */}
+      <div className="p-3.5 rounded-xl bg-gradient-to-r from-cyan-950/40 via-slate-900 to-slate-900 border border-cyan-500/30 flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-mono text-[10px] font-bold">
+            YOLO11
+          </div>
+          <div>
+            <div className="font-bold text-white flex items-center gap-2">
+              <span>Computer Vision Traffic Detector (Python + OpenCV)</span>
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            </div>
+            <div className="text-slate-400 text-[11px]">
+              Tipe Stream: Camera HP / IP Webcam / ESP32-CAM / USB Webcam • Model: yolo11n.pt
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 font-mono text-[11px]">
+          <span className="px-2.5 py-1 rounded bg-slate-900 border border-slate-800 text-cyan-300">
+            Node ID: <strong className="text-white">YOLO-CV-TRAFFIC-01</strong>
+          </span>
+          <span className="px-2.5 py-1 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-bold">
+            Status: {selectedIntersection.statusText} ({selectedIntersection.vehicleCount} Unit)
+          </span>
+        </div>
+      </div>
+
+      {/* Live YOLO11 Computer Vision Video Stream Player */}
+      <div className="glass-panel-accent rounded-2xl p-4 overflow-hidden border border-cyan-500/40">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+          <div className="flex items-center gap-2">
+            <Video className="w-4 h-4 text-cyan-400" />
+            <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+              Live Camera Stream & Visualisasi Bounding Box (YOLO11 AI Feed)
+            </h3>
+          </div>
+          <div className="flex items-center gap-2 text-xs">
+            <span className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30 font-mono">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+              LIVE STREAM STREAMING (PORT 8088)
+            </span>
+          </div>
+        </div>
+
+        <div className="mt-3 relative aspect-video w-full rounded-xl bg-[#070D1A] overflow-hidden border border-slate-800 flex items-center justify-center">
+          <img
+            src="http://localhost:8088/video_feed"
+            alt="Live YOLO11 Computer Vision Traffic Feed"
+            className="w-full h-full object-contain"
+            onError={(e) => {
+              // Fallback tampilan video streaming jika python main.py sedang inisialisasi
+              const target = e.target as HTMLImageElement;
+              target.onerror = null;
+              target.src = 'http://10.218.17.201:8080/video';
+            }}
+          />
+          <div className="absolute bottom-3 left-3 bg-slate-950/85 backdrop-blur-md px-3 py-1.5 rounded-lg border border-slate-800 text-[11px] font-mono text-cyan-300 flex items-center gap-2 shadow-lg">
+            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+            <span>Feed: http://localhost:8088/video_feed</span>
+          </div>
+          <div className="absolute top-3 right-3 bg-rose-500/80 backdrop-blur-md text-white px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider shadow-lg">
+            REC • LIVE AI VISION
+          </div>
+        </div>
       </div>
 
       {/* Key Metrics Grid for Selected Intersection */}
