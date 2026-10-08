@@ -6,120 +6,119 @@ export type SubsystemType =
   | 'air-quality' 
   | 'iot-devices' 
   | 'automation' 
-  | 'alerts' 
-  | 'analytics' 
-  | 'settings';
+  | 'alerts';
 
-export type TrafficLightState = 'red' | 'yellow' | 'green';
+export type TrafficLightColor = 'green' | 'yellow' | 'red';
 
-export interface TrafficIntersection {
+// Fitur 4: Smart Traffic dari Kamera AI YOLO11
+export interface CameraTrafficData {
   id: string;
   name: string;
   density: number; // 0 - 100%
   vehicleCount: number;
   avgSpeedKmh: number;
   queueLengthMeters: number;
-  currentLight: TrafficLightState;
+  currentLight: TrafficLightColor;
   countdownSeconds: number;
   isAutomatic: boolean;
-  greenExtensionSeconds: number;
-  manualPhases: {
-    red: number;
-    yellow: number;
-    green: number;
-  };
-  emergencyPriorityActive: boolean;
   statusText: 'LANCAR' | 'SEDANG' | 'PADAT' | 'MACET TOTAL';
+  vehicleCounts?: {
+    motor?: number;
+    mobil?: number;
+    bus?: number;
+    truk?: number;
+  };
+  streamUrl: string;
 }
 
-export interface PJUNode {
-  id: string;
-  name: string;
-  location: string;
-  brightness: number; // 0 - 100%
-  powerWatts: number;
-  status: 'optimal' | 'energy_saving' | 'standby' | 'fault';
-  motionDetected: boolean;
-  isAutomatic: boolean;
-  coordinates: { x: number; y: number };
-  lastMotionTime?: string;
+// Fitur 3: Smart PJU Otomatis (Sensor LDR & LED Merah + LED Putih)
+export interface SmartPJUData {
+  ldrValue: number; // ADC Pin 36 (0 - 4095)
+  thresholdLdr: number; // Default 2000
+  kondisi: 'GELAP' | 'TERANG';
+  pjuStatus: 'MENYALA' | 'MATI';
+  ledMerah: boolean; // Pin 25
+  ledPutih: boolean; // Pin 26
+  pinLdr: number; // 36
+  pinLedMerah: number; // 25
+  pinLedPutih: number; // 26
 }
 
-export interface PedestrianCrossing {
-  id: string;
-  location: string;
-  pedestrianCount: number;
-  waitingCount: number;
-  status: 'NORMAL' | 'MODERATE' | 'HIGH ACTIVITY';
-  pelicanState: 'WALK' | 'WAIT';
-  countdownSeconds: number;
-  autoTriggerThreshold: number;
-  isTriggered: boolean;
+// Fitur 2: Smart Penyeberangan (2 Ultrasonik, LED Hijau/Kuning/Merah, Buzzer)
+export interface SmartCrossingData {
+  jarakKanan: number | null; // cm (TRIG 32, ECHO 34)
+  jarakKiri: number | null; // cm (TRIG 33, ECHO 35)
+  batasKanan: number; // Default 17 cm
+  batasKiri: number; // Default 25 cm
+  waktuKuning: number; // Default 1 detik
+  waktuMenyeberang: number; // Default 5 detik
+  siapMenyeberang: boolean; // Lock: mencegah pemicuan ulang sampai area kosong
+  orangKanan: boolean;
+  orangKiri: boolean;
+  lampu: 'HIJAU' | 'KUNING' | 'MERAH'; // LED Pin 12 (Hijau), Pin 14 (Kuning), Pin 27 (Merah)
+  buzzer: boolean; // Pin 13
+  countdownSeconds: number; // Sisa waktu menyeberang (5s saat merah)
+  statusRingkasan: 'AMAN' | 'ORANG TERDETEKSI' | 'ORANG MENYEBRANG' | 'MENUNGGU KOSONG';
+  pinTrigKanan: number; // 32
+  pinEchoKanan: number; // 34
+  pinTrigKiri: number; // 33
+  pinEchoKiri: number; // 35
+  pinLedHijau: number; // 12
+  pinLedKuning: number; // 14
+  pinLedMerah: number; // 27
+  pinBuzzer: number; // 13
 }
 
-export interface AirQualityData {
-  id: string;
-  zone: string;
-  aqi: number;
-  pm25: number; // ug/m3
-  co: number; // ppm
-  co2: number; // ppm
-  no2: number; // ppb
-  temperature: number; // Celsius
-  humidity: number; // %
-  status: 'Good' | 'Moderate' | 'Unhealthy' | 'Very Unhealthy' | 'Hazardous';
-  mitigationActive: boolean;
-  mistingCannonsActive: boolean;
-  trafficDiversionRecommended: boolean;
+// Fitur 1: Monitoring Polusi Udara (Sensor Gas/MQ ADC Pin 39)
+export interface GasAirQualityData {
+  gasValue: number; // ADC Pin 39 (0 - 4095)
+  statusPolusi: 'UDARA BERSIH' | 'POLUSI SEDANG' | 'POLUSI TINGGI';
+  pinGas: number; // 39
+  thresholdBersih: number; // 1000
+  thresholdSedang: number; // 1500
 }
 
-export type DeviceType = 'Traffic Sensor' | 'PJU Sensor' | 'Air Sensor' | 'Pedestrian Radar' | 'IoT Gateway';
-export type DeviceStatus = 'Online' | 'Offline' | 'Warning' | 'Maintenance';
+export type DeviceType = 
+  | 'ESP32 Miniatur IoT' 
+  | 'Traffic AI Camera' 
+  | 'Sensor Polusi Gas MQ' 
+  | 'Sensor Ultrasonik Penyeberangan' 
+  | 'Sensor Cahaya LDR PJU';
+
+export type DeviceStatus = 'Online' | 'Offline' | 'Warning';
 
 export interface IoTDevice {
   id: string;
   name: string;
   type: DeviceType;
-  location: string;
+  pinout: string;
   status: DeviceStatus;
-  signalRssi: number; // 0 - 100%
-  batteryLevel?: number; // 0 - 100% or mains
-  isMainsPowered: boolean;
   lastPing: string;
-  ipAddress: string;
-  mqttTopic: string;
-  firmwareVersion: string;
-  coordinates: { x: number; y: number };
+  connectionType: 'WiFi HTTP/MQTT' | 'Python MJPEG Stream' | 'GPIO Internal';
+  description: string;
 }
 
 export interface AutomationRule {
   id: string;
   title: string;
-  description: string;
-  triggerCategory: 'traffic' | 'lighting' | 'pedestrian' | 'air';
-  ifConditionText: string;
-  thenActionText: string;
+  feature: 'polusi' | 'penyeberangan' | 'pju' | 'traffic';
+  conditionText: string;
+  actionText: string;
   isEnabled: boolean;
-  thresholdValue: number;
-  thresholdUnit: string;
-  lastTriggered?: string;
   triggerCount: number;
+  lastTriggered?: string;
 }
 
-export type AlertSeverity = 'CRITICAL' | 'WARNING' | 'INFO' | 'RESOLVED';
+export type AlertSeverity = 'CRITICAL' | 'WARNING' | 'INFO';
 
 export interface SystemAlert {
   id: string;
   timestamp: string;
   severity: AlertSeverity;
   subsystem: string;
-  location: string;
-  sensor: string;
   title: string;
   description: string;
-  systemResponse: string;
   isRead: boolean;
-  isAcknowledged: boolean;
   isResolved: boolean;
 }
 
@@ -129,7 +128,5 @@ export interface SystemEventLog {
   subsystem: string;
   event: string;
   details: string;
-  type: 'AUTO' | 'MANUAL' | 'SYSTEM';
+  type: 'AUTO' | 'HARDWARE' | 'MANUAL';
 }
-
-export type SimulationScenario = 'NORMAL' | 'RUSH_HOUR' | 'NIGHT_PATROL' | 'SMOG_CRISIS' | 'RAIN_STORM';

@@ -11,9 +11,7 @@ import {
   Wind,
   Cpu,
   Zap,
-  BarChart3,
   Bell,
-  Settings,
   Activity,
   Radio,
   User,
@@ -26,21 +24,19 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
-  const { activeSubsystem, setActiveSubsystem, alerts } = useSmartCity();
+  const { activeSubsystem, setActiveSubsystem, alerts, isLiveIoTMode, isHardwareConnected } = useSmartCity();
 
   const unreadAlertsCount = alerts.filter((a) => !a.isRead && !a.isResolved).length;
 
   const menuItems: { id: SubsystemType; label: string; icon: React.ReactNode; badge?: number }[] = [
-    { id: 'overview', label: 'Overview', icon: <LayoutDashboard className="w-4 h-4" /> },
-    { id: 'traffic', label: 'Traffic ATSC', icon: <Navigation className="w-4 h-4" /> },
-    { id: 'lighting', label: 'Smart Lighting', icon: <Lightbulb className="w-4 h-4" /> },
-    { id: 'pedestrian', label: 'Pedestrian', icon: <Footprints className="w-4 h-4" /> },
-    { id: 'air-quality', label: 'Air Quality', icon: <Wind className="w-4 h-4" /> },
-    { id: 'iot-devices', label: 'IoT Devices', icon: <Cpu className="w-4 h-4" /> },
-    { id: 'automation', label: 'Automation', icon: <Zap className="w-4 h-4" /> },
-    { id: 'analytics', label: 'Analytics', icon: <BarChart3 className="w-4 h-4" /> },
-    { id: 'alerts', label: 'Alerts', icon: <Bell className="w-4 h-4" />, badge: unreadAlertsCount },
-    { id: 'settings', label: 'Settings', icon: <Settings className="w-4 h-4" /> },
+    { id: 'overview', label: 'Ringkasan Miniatur', icon: <LayoutDashboard className="w-4 h-4" /> },
+    { id: 'traffic', label: 'Traffic AI Camera', icon: <Navigation className="w-4 h-4" /> },
+    { id: 'lighting', label: 'Smart PJU (LDR)', icon: <Lightbulb className="w-4 h-4" /> },
+    { id: 'pedestrian', label: 'Smart Penyeberangan', icon: <Footprints className="w-4 h-4" /> },
+    { id: 'air-quality', label: 'Monitoring Polusi', icon: <Wind className="w-4 h-4" /> },
+    { id: 'iot-devices', label: 'Hardware & Pinout', icon: <Cpu className="w-4 h-4" /> },
+    { id: 'automation', label: 'Logika Otomasi', icon: <Zap className="w-4 h-4" /> },
+    { id: 'alerts', label: 'Notifikasi & Log', icon: <Bell className="w-4 h-4" />, badge: unreadAlertsCount },
   ];
 
   const handleNavClick = (id: SubsystemType) => {
@@ -77,7 +73,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
                 <h1 className="text-base font-extrabold tracking-tight text-white flex items-center gap-1.5">
                   Urban<span className="text-cyan-400">Pulse</span>
                 </h1>
-                <p className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Smart City Core</p>
+                <p className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Miniatur IoT Smart City</p>
               </div>
             </div>
 
@@ -92,7 +88,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
           {/* Navigation Menu */}
           <nav className="p-3 space-y-1">
             <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              Command Modules
+              Modul Miniatur IoT
             </div>
             {menuItems.map((item) => {
               const isActive = activeSubsystem === item.id;
@@ -127,23 +123,27 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
           <div className="space-y-2 mb-3">
             <div className="flex items-center justify-between text-[11px]">
               <span className="text-slate-400 flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                System Status:
+                <span className={`w-2 h-2 rounded-full ${isHardwareConnected ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`} />
+                ESP32 Hardware:
               </span>
-              <span className="font-semibold text-emerald-400">Online (Optimal)</span>
+              <span className={`font-semibold ${isHardwareConnected ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {isHardwareConnected ? 'Online (Terhubung)' : 'Offline (Terputus)'}
+              </span>
             </div>
 
             <div className="flex items-center justify-between text-[11px]">
               <span className="text-slate-400 flex items-center gap-1.5">
                 <Radio className="w-3 h-3 text-cyan-400" />
-                MQTT Broker:
+                Live Ingestion:
               </span>
-              <span className="font-semibold text-cyan-400 font-mono">Connected :8883</span>
+              <span className="font-semibold text-cyan-400 font-mono">
+                {isLiveIoTMode ? 'Aktif (Auto)' : 'Manual'}
+              </span>
             </div>
 
             <div className="flex items-center justify-between text-[11px]">
-              <span className="text-slate-400">Last Sync:</span>
-              <span className="font-mono text-slate-300">Live (3s tick)</span>
+              <span className="text-slate-400">Firmware:</span>
+              <span className="font-mono text-slate-300">ESP32 MicroPython</span>
             </div>
           </div>
 
@@ -153,8 +153,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
               <User className="w-4 h-4" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-semibold text-white truncate">SMK IoT Commander</div>
-              <div className="text-[10px] text-slate-400 truncate">Administrator Level 1</div>
+              <div className="text-xs font-semibold text-white truncate">IoT Miniatur Operator</div>
+              <div className="text-[10px] text-slate-400 truncate">Thonny & Python Vision</div>
             </div>
           </div>
         </div>

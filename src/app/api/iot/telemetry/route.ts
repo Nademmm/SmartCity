@@ -1,9 +1,8 @@
 import { NextResponse } from 'next/server';
 
-// In-memory telemetry cache untuk menyimpan paket data terakhir yang diterima dari ESP32
 export interface TelemetryPacket {
   deviceId: string;
-  type: 'traffic' | 'pju' | 'pedestrian' | 'air-quality';
+  type: string;
   timestamp: string;
   zone?: string;
   nodeId?: string;
@@ -12,7 +11,6 @@ export interface TelemetryPacket {
   payload: Record<string, any>;
 }
 
-// Global store dalam lifecycle Next.js server
 declare global {
   var __urbanpulse_latest_telemetry: Record<string, TelemetryPacket> | undefined;
   var __urbanpulse_telemetry_history: TelemetryPacket[] | undefined;
@@ -51,9 +49,42 @@ export async function POST(request: Request) {
       payload,
     };
 
-    // Simpan paket data terbaru
+    // Simpan data terbaru
     global.__urbanpulse_latest_telemetry![type] = packet;
     global.__urbanpulse_latest_telemetry![deviceId] = packet;
+
+    // Jika mengirim paket all-in-one miniatur
+    if (type === 'miniature-all') {
+      if (payload.gas) {
+        global.__urbanpulse_latest_telemetry!['air-quality'] = {
+          deviceId,
+          type: 'air-quality',
+          timestamp: packet.timestamp,
+          payload: payload.gas,
+        };
+      }
+      if (payload.crossing) {
+        global.__urbanpulse_latest_telemetry!['pedestrian'] = {
+          deviceId,
+          type: 'pedestrian',
+          timestamp: packet.timestamp,
+          payload: payload.crossing,
+        };
+      }
+      if (payload.pju) {
+        global.__urbanpulse_latest_telemetry!['pju'] = {
+          deviceId,
+          type: 'pju',
+          timestamp: packet.timestamp,
+          payload: payload.pju,
+        };
+      }
+    }
+
+    // Normalisasi 'gas' alias ke 'air-quality'
+    if (type === 'gas') {
+      global.__urbanpulse_latest_telemetry!['air-quality'] = packet;
+    }
 
     // Simpan riwayat paket (maksimal 100 paket terakhir)
     global.__urbanpulse_telemetry_history!.unshift(packet);

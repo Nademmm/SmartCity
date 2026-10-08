@@ -8,21 +8,44 @@ logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(m
 class ThreadedCamera:
     """
     Threaded VideoCapture ultra-low-latency untuk mengambil frame terbaru secara real-time.
-    Membuang (flush) buffer lama secara agresif agar tidak ada akumulasi delay/lag pada IP Webcam / ESP32-CAM.
+    Membuang (flush) buffer lama secara agresif agar tidak ada akumulasi delay atau lag.
+    Mendukung webcam USB (DirectShow pada Windows) maupun IP stream.
     """
     def __init__(self, src, reconnect_interval=3.0):
         self.src = src
         self.reconnect_interval = reconnect_interval
-        self.cap = cv2.VideoCapture(self.src)
+        self.cap = self._open_capture()
         
         # Minimalkan buffer internal OpenCV ke 1 frame
         if isinstance(self.src, str) and ("http" in self.src or "rtsp" in self.src):
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
         self.grabbed, self.frame = self.cap.read()
+        if not self.cap.isOpened() or not self.grabbed:
+            logging.warning(f"Kamera (source: {self.src}) belum siap atau tidak menghasilkan frame.")
+            if isinstance(self.src, int):
+                alt_idx = 1 if self.src == 0 else 0
+                logging.info(f"Tips: Jika menggunakan webcam USB eksternal di laptop, coba set CAMERA_SOURCE={alt_idx} di file .env")
+
         self.started = False
         self.read_lock = threading.Lock()
         self.thread = None
+
+    def _open_capture(self):
+        """Membuka VideoCapture dengan DirectShow (Windows) untuk USB webcam agar cepat dan minim lag."""
+        if isinstance(self.src, int):
+            try:
+                cap = cv2.VideoCapture(self.src, cv2.CAP_DSHOW)
+                if cap.isOpened():
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                    cap.set(cv2.CAP_PROP_FPS, 30)
+                    return cap
+            except Exception:
+                pass
+            return cv2.VideoCapture(self.src)
+        else:
+            return cv2.VideoCapture(self.src)
 
     def start(self):
         if self.started:
@@ -41,7 +64,7 @@ class ThreadedCamera:
                 logging.warning(f"Kamera/Stream terputus ({self.src}). Mencoba reconnect...")
                 time.sleep(self.reconnect_interval)
                 self.cap.release()
-                self.cap = cv2.VideoCapture(self.src)
+                self.cap = self._open_capture()
                 if isinstance(self.src, str) and ("http" in self.src or "rtsp" in self.src):
                     self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 continue

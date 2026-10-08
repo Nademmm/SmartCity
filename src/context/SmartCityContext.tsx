@@ -3,114 +3,108 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import {
   SubsystemType,
-  TrafficIntersection,
-  PJUNode,
-  PedestrianCrossing,
-  AirQualityData,
+  CameraTrafficData,
+  SmartPJUData,
+  SmartCrossingData,
+  GasAirQualityData,
   IoTDevice,
   AutomationRule,
   SystemAlert,
   SystemEventLog,
-  SimulationScenario,
 } from '@/types/iot';
 import {
-  INITIAL_INTERSECTIONS,
-  INITIAL_PJU_NODES,
-  INITIAL_PEDESTRIAN_CROSSINGS,
-  INITIAL_AIR_QUALITY,
-  INITIAL_IOT_DEVICES,
-  INITIAL_AUTOMATION_RULES,
+  INITIAL_TRAFFIC,
+  INITIAL_PJU,
+  INITIAL_CROSSING,
+  INITIAL_GAS,
+  INITIAL_DEVICES,
+  INITIAL_RULES,
   INITIAL_ALERTS,
-  INITIAL_EVENT_LOGS,
+  INITIAL_LOGS,
 } from '@/services/iotSimulationEngine';
 import { sounds } from '@/services/soundEffects';
 
 interface SmartCityContextType {
   activeSubsystem: SubsystemType;
   setActiveSubsystem: (subsystem: SubsystemType) => void;
-  
-  intersections: TrafficIntersection[];
-  pjuNodes: PJUNode[];
-  pedestrians: PedestrianCrossing[];
-  airQuality: AirQualityData;
+
+  // 4 Core Subsystems
+  traffic: CameraTrafficData;
+  pju: SmartPJUData;
+  crossing: SmartCrossingData;
+  gas: GasAirQualityData;
+
   devices: IoTDevice[];
   rules: AutomationRule[];
   alerts: SystemAlert[];
   eventLogs: SystemEventLog[];
-  
-  selectedDeviceForInspection: IoTDevice | null;
-  setSelectedDeviceForInspection: (device: IoTDevice | null) => void;
-  
-  scenario: SimulationScenario;
-  setScenario: (scenario: SimulationScenario) => void;
-  
+
   isSimulating: boolean;
   setIsSimulating: (simulating: boolean) => void;
-  
+
   isAudioMuted: boolean;
   toggleAudioMute: () => void;
-  
-  // Action Handlers
-  updateTrafficLightMode: (id: string, isAuto: boolean) => void;
-  updateTrafficManualPhases: (id: string, phases: { red: number; yellow: number; green: number }) => void;
-  triggerEmergencyCorridor: (id: string) => void;
-  
-  updatePJUBrightness: (id: string, brightness: number, isAuto?: boolean) => void;
-  togglePJUPower: (id: string) => void;
-  simulatePJUMotion: (id: string) => void;
-  
-  triggerPelicanCrossing: (id: string) => void;
-  
-  toggleAQIMitigation: () => void;
-  toggleMistingCannons: () => void;
-  
-  toggleRule: (id: string) => void;
-  updateRuleThreshold: (id: string, newThreshold: number) => void;
-  testRule: (id: string) => void;
-  
-  markAlertAsRead: (id: string) => void;
-  acknowledgeAlert: (id: string) => void;
-  resolveAlert: (id: string) => void;
-  clearResolvedAlerts: () => void;
-  
-  restartIoTDevice: (id: string) => void;
-  pingIoTDevice: (id: string) => void;
-  
-  // Sustainability Score
-  sustainabilityScore: number;
-  
-  // Real Hardware IoT Sync
+
   isLiveIoTMode: boolean;
   toggleLiveIoTMode: () => void;
   lastTelemetryTimestamp: string | null;
+
+  // Real Hardware Connection Status
+  isHardwareConnected: boolean;
+  isCameraConnected: boolean;
+  setIsCameraConnected: (connected: boolean) => void;
+  updateTrafficCameraData: (data: Partial<CameraTrafficData>) => void;
+
+  // PJU Action Handlers
+  setLdrValue: (value: number) => void;
+  togglePjuDayNight: () => void;
+
+  // Crossing Action Handlers
+  triggerCrossingDetection: (side: 'kanan' | 'kiri' | 'kedua') => void;
+  resetCrossingToSafe: () => void;
+  updateUltrasonicDistances: (kanan: number, kiri: number) => void;
+
+  // Gas Action Handlers
+  setGasSensorValue: (value: number) => void;
+
+  // Traffic Action Handlers
+  triggerTrafficEmergency: () => void;
+  setTrafficModeAuto: (isAuto: boolean) => void;
+
+  // Alerts & Rules
+  toggleRule: (id: string) => void;
+  markAlertAsRead: (id: string) => void;
+  resolveAlert: (id: string) => void;
 }
 
 const SmartCityContext = createContext<SmartCityContextType | undefined>(undefined);
 
 export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   const [activeSubsystem, setActiveSubsystem] = useState<SubsystemType>('overview');
-  const [intersections, setIntersections] = useState<TrafficIntersection[]>(INITIAL_INTERSECTIONS);
-  const [pjuNodes, setPjuNodes] = useState<PJUNode[]>(INITIAL_PJU_NODES);
-  const [pedestrians, setPedestrians] = useState<PedestrianCrossing[]>(INITIAL_PEDESTRIAN_CROSSINGS);
-  const [airQuality, setAirQuality] = useState<AirQualityData>(INITIAL_AIR_QUALITY);
-  const [devices, setDevices] = useState<IoTDevice[]>(INITIAL_IOT_DEVICES);
-  const [rules, setRules] = useState<AutomationRule[]>(INITIAL_AUTOMATION_RULES);
+
+  const [traffic, setTraffic] = useState<CameraTrafficData>(INITIAL_TRAFFIC);
+  const [pju, setPju] = useState<SmartPJUData>(INITIAL_PJU);
+  const [crossing, setCrossing] = useState<SmartCrossingData>(INITIAL_CROSSING);
+  const [gas, setGas] = useState<GasAirQualityData>(INITIAL_GAS);
+
+  const [devices, setDevices] = useState<IoTDevice[]>(INITIAL_DEVICES);
+  const [rules, setRules] = useState<AutomationRule[]>(INITIAL_RULES);
   const [alerts, setAlerts] = useState<SystemAlert[]>(INITIAL_ALERTS);
-  const [eventLogs, setEventLogs] = useState<SystemEventLog[]>(INITIAL_EVENT_LOGS);
-  
-  const [selectedDeviceForInspection, setSelectedDeviceForInspection] = useState<IoTDevice | null>(null);
-  const [scenario, setScenarioState] = useState<SimulationScenario>('NORMAL');
+  const [eventLogs, setEventLogs] = useState<SystemEventLog[]>(INITIAL_LOGS);
+
   const [isSimulating, setIsSimulating] = useState<boolean>(true);
   const [isAudioMuted, setIsAudioMuted] = useState<boolean>(false);
   const [isLiveIoTMode, setIsLiveIoTMode] = useState<boolean>(true);
   const [lastTelemetryTimestamp, setLastTelemetryTimestamp] = useState<string | null>(null);
+
+  const [isHardwareConnected, setIsHardwareConnected] = useState<boolean>(false);
+  const [isCameraConnected, setIsCameraConnected] = useState<boolean>(false);
 
   const toggleLiveIoTMode = useCallback(() => {
     setIsLiveIoTMode((prev) => !prev);
     sounds.playClick();
   }, []);
 
-  // Sound muting synchronization
   const toggleAudioMute = useCallback(() => {
     setIsAudioMuted((prev) => {
       const next = !prev;
@@ -119,478 +113,326 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
     });
   }, []);
 
-  const addEventLog = useCallback((subsystem: string, event: string, details: string, type: 'AUTO' | 'MANUAL' | 'SYSTEM' = 'AUTO') => {
-    const newLog: SystemEventLog = {
-      id: `LOG-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      timestamp: new Date().toLocaleTimeString('id-ID', { hour12: false }),
-      subsystem,
-      event,
-      details,
-      type,
-    };
-    setEventLogs((prev) => [newLog, ...prev.slice(0, 49)]); // Keep latest 50
-  }, []);
-
-  const addAlert = useCallback((
-    severity: 'CRITICAL' | 'WARNING' | 'INFO',
-    subsystem: string,
-    location: string,
-    sensor: string,
-    title: string,
-    description: string,
-    systemResponse: string
-  ) => {
-    const newAlert: SystemAlert = {
-      id: `ALT-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString('id-ID', { hour12: false }),
-      severity,
-      subsystem,
-      location,
-      sensor,
-      title,
-      description,
-      systemResponse,
-      isRead: false,
-      isAcknowledged: false,
-      isResolved: false,
-    };
-    setAlerts((prev) => [newAlert, ...prev]);
-    if (severity === 'CRITICAL') {
-      sounds.playCritical();
-    } else if (severity === 'WARNING') {
-      sounds.playAlert();
-    }
-  }, []);
-
-  // Scenario switchers
-  const setScenario = useCallback((newScenario: SimulationScenario) => {
-    setScenarioState(newScenario);
-    sounds.playClick();
-
-    if (newScenario === 'RUSH_HOUR') {
-      setIntersections((prev) =>
-        prev.map((it) => ({
-          ...it,
-          density: Math.min(95, it.density + 25),
-          statusText: 'MACET TOTAL',
-          queueLengthMeters: it.queueLengthMeters + 50,
-        }))
-      );
-      addEventLog('Scenario', 'Skenario RUSH HOUR diaktifkan', 'Kepadatan seluruh simpang meningkat drastis', 'MANUAL');
-    } else if (newScenario === 'SMOG_CRISIS') {
-      setAirQuality((prev) => ({
-        ...prev,
-        aqi: 145,
-        pm25: 78.2,
-        status: 'Unhealthy',
-        trafficDiversionRecommended: true,
-      }));
-      addAlert(
-        'CRITICAL',
-        'Air Quality',
-        'Kawasan Industri & Pusat Kota',
-        'ESP32-003 Multi-Gas',
-        'Polusi Udara Mencapai Level Kritis (AQI 145)',
-        'Konsentrasi PM2.5 melampaui batas aman WHO.',
-        'Sistem otomatis merekomendasikan aktivasi misting cannon dan pengalihan rute.'
-      );
-      addEventLog('Scenario', 'Skenario SMOG CRISIS diaktifkan', 'AQI melonjak ke 145, tindakan mitigasi diperlukan', 'MANUAL');
-    } else if (newScenario === 'NIGHT_PATROL') {
-      setPjuNodes((prev) =>
-        prev.map((pju) => ({
-          ...pju,
-          brightness: pju.motionDetected ? 100 : 30,
-          status: pju.motionDetected ? 'optimal' : 'energy_saving',
-        }))
-      );
-      addEventLog('Scenario', 'Skenario NIGHT PATROL diaktifkan', 'PJU memasuki mode hemat daya adaptif 30%', 'MANUAL');
-    } else {
-      // Return to normal
-      setAirQuality(INITIAL_AIR_QUALITY);
-      addEventLog('Scenario', 'Skenario NORMAL diaktifkan', 'Kondisi telemetri kembali ke baseline standar', 'MANUAL');
-    }
-  }, [addEventLog, addAlert]);
-
-  // Traffic Handlers
-  const updateTrafficLightMode = useCallback((id: string, isAuto: boolean) => {
-    sounds.playClick();
-    setIntersections((prev) =>
-      prev.map((it) => (it.id === id ? { ...it, isAutomatic: isAuto } : it))
-    );
-    addEventLog('Traffic ATSC', `Mode Simpang ${id} diubah ke ${isAuto ? 'OTOMATIS' : 'MANUAL'}`, `Kontrol operator diterapkan`, 'MANUAL');
-  }, [addEventLog]);
-
-  const updateTrafficManualPhases = useCallback((id: string, phases: { red: number; yellow: number; green: number }) => {
-    sounds.playClick();
-    setIntersections((prev) =>
-      prev.map((it) => (it.id === id ? { ...it, manualPhases: phases } : it))
-    );
-    addEventLog('Traffic ATSC', `Durasi fase manual ${id} diperbarui`, `R: ${phases.red}s, Y: ${phases.yellow}s, G: ${phases.green}s`, 'MANUAL');
-  }, [addEventLog]);
-
-  const triggerEmergencyCorridor = useCallback((id: string) => {
-    sounds.playSuccess();
-    setIntersections((prev) =>
-      prev.map((it) => {
-        if (it.id === id) {
-          const nextActive = !it.emergencyPriorityActive;
-          return {
-            ...it,
-            emergencyPriorityActive: nextActive,
-            currentLight: nextActive ? 'green' : it.currentLight,
-            countdownSeconds: nextActive ? 45 : it.countdownSeconds,
-          };
-        }
-        return it;
-      })
-    );
-    addEventLog('Emergency', `Koridor Prioritas Darurat ${id} diaktifkan!`, 'Lampu hijau dipaksakan untuk kendaraan darurat / ambulans', 'MANUAL');
-  }, [addEventLog]);
-
-  // PJU Handlers
-  const updatePJUBrightness = useCallback((id: string, brightness: number, isAuto?: boolean) => {
-    sounds.playClick();
-    setPjuNodes((prev) =>
-      prev.map((pju) => {
-        if (pju.id === id) {
-          const autoState = isAuto !== undefined ? isAuto : pju.isAutomatic;
-          return {
-            ...pju,
-            brightness,
-            powerWatts: Math.round(60 * (brightness / 100)),
-            status: brightness <= 30 ? 'energy_saving' : 'optimal',
-            isAutomatic: autoState,
-          };
-        }
-        return pju;
-      })
-    );
-  }, []);
-
-  const togglePJUPower = useCallback((id: string) => {
-    sounds.playClick();
-    setPjuNodes((prev) =>
-      prev.map((pju) => {
-        if (pju.id === id) {
-          const isCurrentlyOff = pju.status === 'standby' || pju.brightness === 0;
-          const nextBrightness = isCurrentlyOff ? 70 : 0;
-          return {
-            ...pju,
-            brightness: nextBrightness,
-            powerWatts: isCurrentlyOff ? 42 : 0,
-            status: isCurrentlyOff ? 'optimal' : 'standby',
-            isAutomatic: false,
-          };
-        }
-        return pju;
-      })
-    );
-    addEventLog('PJU Lighting', `Power status tiang ${id} diubah manual`, 'Perintah dikirim via MQTT', 'MANUAL');
-  }, [addEventLog]);
-
-  const simulatePJUMotion = useCallback((id: string) => {
-    sounds.playClick();
-    setPjuNodes((prev) =>
-      prev.map((pju) => {
-        if (pju.id === id) {
-          return {
-            ...pju,
-            motionDetected: true,
-            brightness: 100,
-            powerWatts: 60,
-            status: 'optimal',
-            lastMotionTime: 'Baru saja',
-          };
-        }
-        return pju;
-      })
-    );
-    addEventLog('Smart PJU', `Sensor Gerak terdeteksi pada ${id}`, 'Otomasi Rule 02: Intensitas dinaikkan menjadi 100%', 'AUTO');
-  }, [addEventLog]);
-
-  // Pelican Crossing Handler
-  const triggerPelicanCrossing = useCallback((id: string) => {
-    sounds.playSuccess();
-    setPedestrians((prev) =>
-      prev.map((ped) => {
-        if (ped.id === id) {
-          return {
-            ...ped,
-            pelicanState: 'WALK',
-            countdownSeconds: 15,
-            isTriggered: true,
-          };
-        }
-        return ped;
-      })
-    );
-    addEventLog('Pedestrian', `Smart Pelican Crossing ${id} diaktifkan`, 'Sinyal WALK aktif, lalu lintas kendaraan dihentikan', 'MANUAL');
-  }, [addEventLog]);
-
-  // Air Quality Mitigation
-  const toggleAQIMitigation = useCallback(() => {
-    sounds.playClick();
-    setAirQuality((prev) => {
-      const nextState = !prev.mitigationActive;
-      return {
-        ...prev,
-        mitigationActive: nextState,
-        mistingCannonsActive: nextState,
-        trafficDiversionRecommended: nextState,
-        aqi: nextState ? Math.max(45, prev.aqi - 20) : prev.aqi,
+  const addEventLog = useCallback(
+    (subsystem: string, event: string, details: string, type: 'AUTO' | 'HARDWARE' | 'MANUAL' = 'AUTO') => {
+      const newLog: SystemEventLog = {
+        id: `LOG-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        timestamp: new Date().toLocaleTimeString('id-ID', { hour12: false }),
+        subsystem,
+        event,
+        details,
+        type,
       };
-    });
-    addEventLog('Air Quality', `Sistem Mitigasi Udara diubah ke status ${!airQuality.mitigationActive ? 'AKTIF' : 'NON-AKTIF'}`, 'Urban Misting Cannon & Reroute disesuaikan', 'MANUAL');
-  }, [addEventLog, airQuality.mitigationActive]);
+      setEventLogs((prev) => [newLog, ...prev.slice(0, 49)]);
+    },
+    []
+  );
 
-  const toggleMistingCannons = useCallback(() => {
-    sounds.playClick();
-    setAirQuality((prev) => ({
+  const addAlert = useCallback(
+    (severity: 'CRITICAL' | 'WARNING' | 'INFO', subsystem: string, title: string, description: string) => {
+      const newAlert: SystemAlert = {
+        id: `ALT-${Date.now()}`,
+        timestamp: new Date().toLocaleTimeString('id-ID', { hour12: false }),
+        severity,
+        subsystem,
+        title,
+        description,
+        isRead: false,
+        isResolved: false,
+      };
+      setAlerts((prev) => [newAlert, ...prev]);
+      if (severity === 'CRITICAL') {
+        sounds.playCritical();
+      } else if (severity === 'WARNING') {
+        sounds.playAlert();
+      }
+    },
+    []
+  );
+
+  // ==========================================================
+  // FITUR 3: SMART PJU LOGIC (MicroPython: LDR > 2000 => GELAP)
+  // ==========================================================
+  const setLdrValue = useCallback((value: number) => {
+    const isDark = value > 2000;
+    setPju((prev) => ({
       ...prev,
-      mistingCannonsActive: !prev.mistingCannonsActive,
+      ldrValue: value,
+      kondisi: isDark ? 'GELAP' : 'TERANG',
+      pjuStatus: isDark ? 'MENYALA' : 'MATI',
+      ledMerah: isDark,
+      ledPutih: isDark,
     }));
   }, []);
 
-  // Automation Rule Handlers
+  const togglePjuDayNight = useCallback(() => {
+    sounds.playClick();
+    setPju((prev) => {
+      const isCurrentlyDark = prev.kondisi === 'GELAP';
+      const newLdr = isCurrentlyDark ? 1100 : 2850;
+      const isDark = newLdr > prev.thresholdLdr;
+      return {
+        ...prev,
+        ldrValue: newLdr,
+        kondisi: isDark ? 'GELAP' : 'TERANG',
+        pjuStatus: isDark ? 'MENYALA' : 'MATI',
+        ledMerah: isDark,
+        ledPutih: isDark,
+      };
+    });
+    addEventLog('Smart PJU', 'Kondisi Cahaya LDR Disimulasikan', 'Uji coba manual nilai LDR diaktifkan', 'MANUAL');
+  }, [addEventLog]);
+
+  // ==========================================================
+  // FITUR 2: SMART PENYEBERANGAN (Ultrasonik Kanan 17cm, Kiri 25cm, 5s)
+  // ==========================================================
+  const triggerCrossingDetection = useCallback(
+    (side: 'kanan' | 'kiri' | 'kedua') => {
+      sounds.playSuccess();
+      const jarakKanan = side === 'kiri' ? 35 : 12; // 12 cm <= BATAS_KANAN (17 cm)
+      const jarakKiri = side === 'kanan' ? 42 : 18;  // 18 cm <= BATAS_KIRI (25 cm)
+
+      const orangKanan = jarakKanan <= 17;
+      const orangKiri = jarakKiri <= 25;
+
+      // Sesuai Thonny ralat: Lampu Kuning 1 detik -> Lampu Merah 5 detik + Buzzer
+      setCrossing((prev) => ({
+        ...prev,
+        jarakKanan,
+        jarakKiri,
+        orangKanan,
+        orangKiri,
+        siapMenyeberang: false,
+        lampu: 'KUNING',
+        buzzer: false,
+        countdownSeconds: 1,
+        statusRingkasan: 'ORANG TERDETEKSI',
+      }));
+
+      addEventLog(
+        'Penyeberangan',
+        `Objek Terdeteksi (${side.toUpperCase()})`,
+        `Jarak Kanan: ${jarakKanan}cm (Batas: 17cm), Kiri: ${jarakKiri}cm (Batas: 25cm). Lampu Kuning 1 detik.`,
+        'MANUAL'
+      );
+
+      // Setelah 1 detik Kuning (WAKTU_KUNING = 1), masuk fase Merah 5s (WAKTU_MENYEBRANG = 5)
+      setTimeout(() => {
+        setCrossing((prev) => ({
+          ...prev,
+          lampu: 'MERAH',
+          buzzer: true,
+          countdownSeconds: 5,
+          statusRingkasan: 'ORANG MENYEBRANG',
+        }));
+      }, 1000);
+    },
+    [addEventLog]
+  );
+
+  const resetCrossingToSafe = useCallback(() => {
+    sounds.playClick();
+    setCrossing((prev) => ({
+      ...prev,
+      jarakKanan: 35.0,
+      jarakKiri: 42.0,
+      orangKanan: false,
+      orangKiri: false,
+      siapMenyeberang: true,
+      lampu: 'HIJAU',
+      buzzer: false,
+      countdownSeconds: 0,
+      statusRingkasan: 'AMAN',
+    }));
+    addEventLog('Penyeberangan', 'Area Kosong (Reset)', 'Lampu Hijau aktif, sistem siap mendeteksi lagi', 'MANUAL');
+  }, [addEventLog]);
+
+  const updateUltrasonicDistances = useCallback(
+    (kanan: number, kiri: number) => {
+      const orangKanan = kanan <= 17;
+      const orangKiri = kiri <= 25;
+      const adaOrang = orangKanan || orangKiri;
+
+      setCrossing((prev) => {
+        let statusRingkasan: 'AMAN' | 'ORANG TERDETEKSI' | 'ORANG MENYEBRANG' | 'MENUNGGU KOSONG' = 'AMAN';
+        if (prev.lampu === 'MERAH') {
+          statusRingkasan = 'ORANG MENYEBRANG';
+        } else if (!prev.siapMenyeberang && adaOrang) {
+          statusRingkasan = 'MENUNGGU KOSONG';
+        } else if (adaOrang) {
+          statusRingkasan = 'ORANG TERDETEKSI';
+        }
+
+        return {
+          ...prev,
+          jarakKanan: kanan,
+          jarakKiri: kiri,
+          orangKanan,
+          orangKiri,
+          siapMenyeberang: !adaOrang ? true : prev.siapMenyeberang,
+          statusRingkasan,
+        };
+      });
+    },
+    []
+  );
+
+  // ==========================================================
+  // FITUR 1: MONITORING POLUSI UDARA (Sensor Gas / MQ ADC Pin 39)
+  // ==========================================================
+  const setGasSensorValue = useCallback(
+    (value: number) => {
+      let statusPolusi: 'UDARA BERSIH' | 'POLUSI SEDANG' | 'POLUSI TINGGI' = 'UDARA BERSIH';
+      if (value < 1000) {
+        statusPolusi = 'UDARA BERSIH';
+      } else if (value < 1500) {
+        statusPolusi = 'POLUSI SEDANG';
+      } else {
+        statusPolusi = 'POLUSI TINGGI';
+      }
+
+      setGas((prev) => ({
+        ...prev,
+        gasValue: value,
+        statusPolusi,
+      }));
+
+      if (value >= 1500) {
+        addAlert('CRITICAL', 'Sensor Gas MQ', 'Peringatan Polusi Udara Tinggi', `Nilai Gas ADC mencapai ${value}`);
+      } else if (value >= 1000) {
+        addAlert('WARNING', 'Sensor Gas MQ', 'Polusi Udara Sedang', `Nilai Gas ADC mencapai ${value}`);
+      }
+    },
+    [addAlert]
+  );
+
+  // ==========================================================
+  // FITUR 4: TRAFFIC CONTROLLER (Kamera AI YOLO11)
+  // ==========================================================
+  const triggerTrafficEmergency = useCallback(() => {
+    sounds.playAlert();
+    setTraffic((prev) => ({
+      ...prev,
+      currentLight: 'green',
+      countdownSeconds: 45,
+    }));
+    addEventLog('Kamera AI', 'Prioritas Jalur Kendaraan Diaktifkan', 'Lampu Hijau dipaksakan untuk kelancaran arus', 'MANUAL');
+  }, [addEventLog]);
+
+  const setTrafficModeAuto = useCallback((isAuto: boolean) => {
+    sounds.playClick();
+    setTraffic((prev) => ({ ...prev, isAutomatic: isAuto }));
+  }, []);
+
+  const updateTrafficCameraData = useCallback((data: Partial<CameraTrafficData>) => {
+    setTraffic((prev) => ({
+      ...prev,
+      ...data,
+      vehicleCounts: data.vehicleCounts
+        ? { ...prev.vehicleCounts, ...data.vehicleCounts }
+        : prev.vehicleCounts,
+    }));
+  }, []);
+
+  // Update devices table when camera connected state changes
+  useEffect(() => {
+    setDevices((prev) =>
+      prev.map((d) => {
+        if (d.id === 'YOLO-CV-TRAFFIC-01') {
+          return {
+            ...d,
+            status: isCameraConnected ? 'Online' : 'Offline',
+            lastPing: isCameraConnected ? 'Webcam Aktif (Direct Browser)' : 'Menunggu Kamera',
+          };
+        }
+        return d;
+      })
+    );
+  }, [isCameraConnected]);
+
+  // Rules & Alerts Handlers
   const toggleRule = useCallback((id: string) => {
     sounds.playClick();
     setRules((prev) =>
-      prev.map((rule) => {
-        if (rule.id === id) {
-          const nextState = !rule.isEnabled;
-          return { ...rule, isEnabled: nextState };
-        }
-        return rule;
-      })
+      prev.map((r) => (r.id === id ? { ...r, isEnabled: !r.isEnabled } : r))
     );
   }, []);
 
-  const updateRuleThreshold = useCallback((id: string, newThreshold: number) => {
-    sounds.playClick();
-    setRules((prev) =>
-      prev.map((rule) => (rule.id === id ? { ...rule, thresholdValue: newThreshold } : rule))
-    );
-  }, []);
-
-  const testRule = useCallback((id: string) => {
-    sounds.playSuccess();
-    const rule = rules.find((r) => r.id === id);
-    if (!rule) return;
-
-    setRules((prev) =>
-      prev.map((r) =>
-        r.id === id
-          ? {
-              ...r,
-              lastTriggered: new Date().toLocaleTimeString('id-ID', { hour12: false }),
-              triggerCount: r.triggerCount + 1,
-            }
-          : r
-      )
-    );
-    addEventLog('Automation', `Uji Eksekusi Otomasi ${rule.title}`, `Aksi simulasi berhasil dijalankan: ${rule.thenActionText}`, 'MANUAL');
-  }, [rules, addEventLog]);
-
-  // Alert Handlers
   const markAlertAsRead = useCallback((id: string) => {
     sounds.playClick();
     setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, isRead: true } : a)));
   }, []);
 
-  const acknowledgeAlert = useCallback((id: string) => {
-    sounds.playClick();
-    setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, isAcknowledged: true, isRead: true } : a)));
-  }, []);
-
   const resolveAlert = useCallback((id: string) => {
     sounds.playSuccess();
-    setAlerts((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, isResolved: true, severity: 'RESOLVED', isRead: true } : a))
-    );
-    addEventLog('Alerts', `Alert ${id} telah ditandai selesai (Resolved)`, 'Status ditutup oleh operator', 'MANUAL');
-  }, [addEventLog]);
-
-  const clearResolvedAlerts = useCallback(() => {
-    sounds.playClick();
-    setAlerts((prev) => prev.filter((a) => !a.isResolved));
+    setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, isResolved: true, isRead: true } : a)));
   }, []);
 
-  // IoT Device Handlers
-  const restartIoTDevice = useCallback((id: string) => {
-    sounds.playClick();
-    setDevices((prev) =>
-      prev.map((d) => (d.id === id ? { ...d, status: 'Warning', lastPing: 'Rebooting...' } : d))
-    );
-    addEventLog('IoT Gateway', `Perintah Soft Reboot dikirim ke ${id}`, 'ESP32 sedang melakukan restart sequence', 'MANUAL');
-    
-    setTimeout(() => {
-      setDevices((prev) =>
-        prev.map((d) => (d.id === id ? { ...d, status: 'Online', lastPing: '1s lalu' } : d))
-      );
-      sounds.playSuccess();
-      addEventLog('IoT Gateway', `Node ${id} berhasil reboot dan kembali ONLINE`, 'ESP32 MQTT handshake 100% OK', 'SYSTEM');
-    }, 2500);
-  }, [addEventLog]);
-
-  const pingIoTDevice = useCallback((id: string) => {
-    sounds.playClick();
-    addEventLog('IoT Gateway', `Ping dikirim ke ${id}`, 'Round-trip latency 14ms (RSSI 98%)', 'MANUAL');
-  }, [addEventLog]);
-
-  // Master Simulation Loop (runs every 1 second for timers, every 3.5s for sensor shifts)
+  // Countdown tick loop only for active crossing sequence and traffic
   useEffect(() => {
     if (!isSimulating) return;
 
-    let secondCounter = 0;
-
     const timer = setInterval(() => {
-      secondCounter += 1;
-
-      // 1. Tick Countdown timers for traffic lights and pelican crossings every second
-      setIntersections((prev) =>
-        prev.map((it) => {
-          if (it.emergencyPriorityActive) return it;
-
-          let nextCountdown = it.countdownSeconds - 1;
-          let nextLight = it.currentLight;
-          let nextGreenExt = it.greenExtensionSeconds;
-
-          if (nextCountdown <= 0) {
-            if (it.currentLight === 'green') {
-              nextLight = 'yellow';
-              nextCountdown = it.isAutomatic ? 4 : it.manualPhases.yellow;
-            } else if (it.currentLight === 'yellow') {
-              nextLight = 'red';
-              nextCountdown = it.isAutomatic ? 35 : it.manualPhases.red;
-            } else {
-              nextLight = 'green';
-              const baseGreen = it.isAutomatic ? 30 : it.manualPhases.green;
-              nextCountdown = baseGreen + nextGreenExt;
-            }
-          }
-          return {
-            ...it,
-            countdownSeconds: Math.max(1, nextCountdown),
-            currentLight: nextLight,
-          };
-        })
-      );
-
-      setPedestrians((prev) =>
-        prev.map((ped) => {
-          let nextCountdown = ped.countdownSeconds - 1;
-          let nextState = ped.pelicanState;
-          let nextIsTriggered = ped.isTriggered;
-
-          if (nextCountdown <= 0) {
-            if (ped.pelicanState === 'WALK') {
-              nextState = 'WAIT';
-              nextCountdown = 30;
-              nextIsTriggered = false;
-            } else {
-              if (ped.waitingCount >= ped.autoTriggerThreshold) {
-                nextState = 'WALK';
-                nextCountdown = 15;
-                nextIsTriggered = true;
-              } else {
-                nextCountdown = 25;
-              }
-            }
-          }
-          return {
-            ...ped,
-            countdownSeconds: Math.max(1, nextCountdown),
-            pelicanState: nextState,
-            isTriggered: nextIsTriggered,
-          };
-        })
-      );
-
-      // 2. Telemetry fluctuations & Rule evaluations every 3.5 seconds
-      if (secondCounter % 3 === 0) {
-        // Intersections density shift
-        setIntersections((prev) =>
-          prev.map((it) => {
-            const delta = (Math.random() - 0.48) * 4;
-            const newDensity = Math.min(98, Math.max(20, Math.round(it.density + delta)));
-            
-            let status: 'LANCAR' | 'SEDANG' | 'PADAT' | 'MACET TOTAL' = 'LANCAR';
-            if (newDensity >= 75) status = 'MACET TOTAL';
-            else if (newDensity >= 60) status = 'PADAT';
-            else if (newDensity >= 40) status = 'SEDANG';
-
-            // ATSC Autonomous Rule Check
-            let ext = it.greenExtensionSeconds;
-            if (it.isAutomatic && newDensity >= 70 && ext === 0) {
-              ext = 20;
-            } else if (newDensity < 65 && ext > 0) {
-              ext = 0;
-            }
-
+      // 1. Tick crossing countdown if currently red (menyeberang)
+      setCrossing((prev) => {
+        if (prev.lampu === 'MERAH' && prev.countdownSeconds > 0) {
+          const nextCountdown = prev.countdownSeconds - 1;
+          if (nextCountdown === 0) {
             return {
-              ...it,
-              density: newDensity,
-              statusText: status,
-              vehicleCount: Math.round(it.vehicleCount + (Math.random() * 8 - 4)),
-              avgSpeedKmh: Math.max(12, Math.min(60, Math.round(65 - (newDensity * 0.55)))),
-              queueLengthMeters: Math.round(newDensity * 1.4),
-              greenExtensionSeconds: ext,
+              ...prev,
+              lampu: 'HIJAU',
+              buzzer: false,
+              countdownSeconds: 0,
+              orangKanan: false,
+              orangKiri: false,
+              siapMenyeberang: true,
+              jarakKanan: 35.0,
+              jarakKiri: 42.0,
+              statusRingkasan: 'AMAN',
             };
-          })
-        );
-
-        // PJU soft decay / motion checks
-        setPjuNodes((prev) =>
-          prev.map((pju) => {
-            if (!pju.isAutomatic) return pju;
-            // If motion was true, have small chance to clear it and softly dim
-            if (pju.motionDetected && Math.random() < 0.25) {
-              return {
-                ...pju,
-                motionDetected: false,
-                brightness: 30,
-                powerWatts: 18,
-                status: 'energy_saving',
-                lastMotionTime: '30s lalu',
-              };
-            }
-            return pju;
-          })
-        );
-
-        // Air Quality drift
-        setAirQuality((prev) => {
-          const deltaAqi = (Math.random() - 0.5) * 3;
-          const currentAqi = Math.max(30, Math.min(180, Math.round(prev.aqi + deltaAqi)));
-          
-          let status: 'Good' | 'Moderate' | 'Unhealthy' | 'Very Unhealthy' | 'Hazardous' = 'Good';
-          if (currentAqi > 150) status = 'Very Unhealthy';
-          else if (currentAqi > 100) status = 'Unhealthy';
-          else if (currentAqi > 50) status = 'Moderate';
-
+          }
           return {
             ...prev,
-            aqi: currentAqi,
-            pm25: Number((currentAqi * 0.53 + (Math.random() * 2 - 1)).toFixed(1)),
-            co2: Math.round(410 + currentAqi * 0.2),
-            status,
+            countdownSeconds: nextCountdown,
           };
-        });
+        }
+        return prev;
+      });
 
-        // Update Device lastPing timestamps
-        setDevices((prev) =>
-          prev.map((d) => ({
-            ...d,
-            lastPing: `${Math.floor(Math.random() * 4) + 1}s lalu`,
-          }))
-        );
-      }
+      // 2. Tick traffic light countdown
+      setTraffic((prev) => {
+        if (!prev.isAutomatic) return prev;
+        const nextSeconds = prev.countdownSeconds - 1;
+        if (nextSeconds <= 0) {
+          let nextLight: 'green' | 'yellow' | 'red' = 'green';
+          let duration = 30;
+          if (prev.currentLight === 'green') {
+            nextLight = 'yellow';
+            duration = 4;
+          } else if (prev.currentLight === 'yellow') {
+            nextLight = 'red';
+            duration = 35;
+          } else {
+            nextLight = 'green';
+            duration = prev.density > 70 ? 45 : 30;
+          }
+          return {
+            ...prev,
+            currentLight: nextLight,
+            countdownSeconds: duration,
+          };
+        }
+        return {
+          ...prev,
+          countdownSeconds: nextSeconds,
+        };
+      });
     }, 1000);
 
     return () => clearInterval(timer);
   }, [isSimulating]);
 
-  // Telemetry Ingestion Polling Effect (mendengarkan data real dari /api/iot/telemetry)
+  // Telemetry Polling Effect (Mengambil data live dari /api/iot/telemetry)
   useEffect(() => {
     if (!isLiveIoTMode) return;
 
@@ -602,173 +444,184 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
         const res = await fetch('/api/iot/telemetry');
         if (!res.ok) return;
         const data = await res.json();
-        
+
         if (!isMounted || !data.latestBySubsystem) return;
 
-        // 1. Cek Kualitas Udara Real
-        if (data.latestBySubsystem['air-quality']) {
-          const air = data.latestBySubsystem['air-quality'];
-          if (air.timestamp !== lastProcessedTimestamp) {
-            lastProcessedTimestamp = air.timestamp;
-            setLastTelemetryTimestamp(air.timestamp);
-            
-            const p = air.payload;
-            let status: 'Good' | 'Moderate' | 'Unhealthy' | 'Very Unhealthy' | 'Hazardous' = 'Good';
-            if (p.aqi > 150) status = 'Very Unhealthy';
-            else if (p.aqi > 100) status = 'Unhealthy';
-            else if (p.aqi > 50) status = 'Moderate';
+        const now = Date.now();
+        let espDataFresh = false;
+        let camDataFresh = false;
 
-            setAirQuality((prev) => ({
+        // 1. Ingest Traffic Data (YOLO11)
+        if (data.latestBySubsystem['traffic']) {
+          const t = data.latestBySubsystem['traffic'];
+          const packetAge = now - new Date(t.timestamp).getTime();
+          if (packetAge < 15000) {
+            camDataFresh = true;
+          }
+
+          if (t.timestamp !== lastProcessedTimestamp) {
+            const p = t.payload;
+            setTraffic((prev) => ({
               ...prev,
-              aqi: p.aqi ?? prev.aqi,
-              pm25: p.pm25 ?? prev.pm25,
-              co: p.co ?? prev.co,
-              co2: p.co2 ?? prev.co2,
-              temperature: p.temperature ?? prev.temperature,
-              humidity: p.humidity ?? prev.humidity,
-              status,
+              density: p.density ?? prev.density,
+              vehicleCount: p.vehicleCount ?? prev.vehicleCount,
+              statusText: p.statusText ?? prev.statusText,
+              avgSpeedKmh: p.avgSpeedKmh ?? prev.avgSpeedKmh,
+              queueLengthMeters: p.queueLengthMeters ?? prev.queueLengthMeters,
+              vehicleCounts: p.counts ?? prev.vehicleCounts,
+              currentLight: p.currentLight ?? prev.currentLight,
             }));
-
-            // Mark device as online
-            setDevices((prev) =>
-              prev.map((d) =>
-                d.id === air.deviceId || d.type === 'Air Sensor'
-                  ? { ...d, status: 'Online', lastPing: 'Baru saja' }
-                  : d
-              )
-            );
           }
         }
 
-        // 2. Cek Lampu PJU Real
+        // 2. Ingest PJU Data (ESP32 Miniatur)
         if (data.latestBySubsystem['pju']) {
-          const pju = data.latestBySubsystem['pju'];
-          const targetId = pju.nodeId || 'pju-1';
-          setPjuNodes((prev) =>
-            prev.map((node) => {
-              if (node.id === targetId) {
-                return {
-                  ...node,
-                  brightness: pju.payload.brightness ?? node.brightness,
-                  powerWatts: pju.payload.powerWatts ?? node.powerWatts,
-                  motionDetected: pju.payload.motionDetected ?? node.motionDetected,
-                  status: pju.payload.status ?? node.status,
-                  lastMotionTime: pju.payload.motionDetected ? 'Baru saja (Hardware PIR)' : node.lastMotionTime,
-                };
-              }
-              return node;
-            })
-          );
+          const pjuPacket = data.latestBySubsystem['pju'];
+          const packetAge = now - new Date(pjuPacket.timestamp).getTime();
+          if (packetAge < 15000) {
+            espDataFresh = true;
+          }
+
+          const p = pjuPacket.payload;
+          const ldr = p.ldrValue ?? p.ldr ?? pju.ldrValue;
+          const isDark = ldr > 2000;
+          setPju((prev) => ({
+            ...prev,
+            ldrValue: ldr,
+            thresholdLdr: p.thresholdLdr ?? prev.thresholdLdr,
+            kondisi: p.kondisi ?? (isDark ? 'GELAP' : 'TERANG'),
+            pjuStatus: p.pjuStatus ?? (isDark ? 'MENYALA' : 'MATI'),
+            ledMerah: p.ledMerah !== undefined ? p.ledMerah : isDark,
+            ledPutih: p.ledPutih !== undefined ? p.ledPutih : isDark,
+          }));
         }
 
-        // 3. Cek Lalu Lintas Real (ESP32 & YOLO11 Computer Vision Stream)
-        if (data.latestBySubsystem['traffic']) {
-          const traffic = data.latestBySubsystem['traffic'];
-          const targetId = traffic.intersectionId || 'TRF-01';
-          setIntersections((prev) =>
-            prev.map((it) => {
-              if (it.id === targetId || (targetId === 'int-1' && it.id === 'TRF-01') || (it.id === 'TRF-01' && traffic.deviceId === 'YOLO-CV-TRAFFIC-01')) {
-                const density = traffic.payload.density ?? it.density;
-                let statusText: 'LANCAR' | 'SEDANG' | 'PADAT' | 'MACET TOTAL' = 'LANCAR';
-                if (traffic.payload.statusText) {
-                  const st = traffic.payload.statusText.toUpperCase();
-                  if (st.includes('MACET')) statusText = 'MACET TOTAL';
-                  else if (st.includes('SEDANG') || st.includes('RAMAI')) statusText = 'SEDANG';
-                  else if (st.includes('PADAT')) statusText = 'PADAT';
-                  else statusText = 'LANCAR';
-                } else {
-                  if (density >= 75) statusText = 'MACET TOTAL';
-                  else if (density >= 60) statusText = 'PADAT';
-                  else if (density >= 35) statusText = 'SEDANG';
-                  else statusText = 'LANCAR';
-                }
+        // 3. Ingest Crossing Data (ESP32 Miniatur)
+        if (data.latestBySubsystem['pedestrian']) {
+          const pedPacket = data.latestBySubsystem['pedestrian'];
+          const packetAge = now - new Date(pedPacket.timestamp).getTime();
+          if (packetAge < 15000) {
+            espDataFresh = true;
+          }
 
-                return {
-                  ...it,
-                  density: density,
-                  vehicleCount: traffic.payload.vehicleCount ?? it.vehicleCount,
-                  avgSpeedKmh: traffic.payload.avgSpeedKmh ?? (density > 70 ? 14 : density > 40 ? 32 : 50),
-                  currentLight: traffic.payload.currentLight ?? it.currentLight,
-                  statusText,
-                  queueLengthMeters: traffic.payload.queueLengthMeters ?? Math.round(density * 1.4),
-                };
-              }
-              return it;
-            })
-          );
+          const c = pedPacket.payload;
+          const jKanan = c.jarakKanan ?? c.jarak_kanan ?? crossing.jarakKanan;
+          const jKiri = c.jarakKiri ?? c.jarak_kiri ?? crossing.jarakKiri;
+          const oKanan = c.orangKanan ?? (jKanan !== null && jKanan <= (c.batasKanan ?? 17));
+          const oKiri = c.orangKiri ?? (jKiri !== null && jKiri <= (c.batasKiri ?? 25));
+          const siapMenyeberang = c.siapMenyeberang ?? c.siap_menyeberang ?? crossing.siapMenyeberang;
 
-          // Update status device YOLO-CV-TRAFFIC-01 & sensor traffic
-          setDevices((prev) =>
-            prev.map((d) =>
-              d.id === traffic.deviceId || (d.id === 'YOLO-CV-TRAFFIC-01' && traffic.type === 'traffic')
-                ? { ...d, status: 'Online', lastPing: 'Baru saja (YOLO11 Live Stream)' }
-                : d
-            )
-          );
+          setCrossing((prev) => ({
+            ...prev,
+            jarakKanan: jKanan,
+            jarakKiri: jKiri,
+            orangKanan: oKanan,
+            orangKiri: oKiri,
+            siapMenyeberang,
+            lampu: c.lampu ?? prev.lampu,
+            buzzer: c.buzzer ?? prev.buzzer,
+            countdownSeconds: c.countdownSeconds ?? prev.countdownSeconds,
+            statusRingkasan:
+              c.statusRingkasan ?? (oKanan || oKiri ? (prev.lampu === 'MERAH' ? 'ORANG MENYEBRANG' : 'ORANG TERDETEKSI') : 'AMAN'),
+          }));
         }
+
+        // 4. Ingest Gas Data (ESP32 Miniatur)
+        if (data.latestBySubsystem['air-quality']) {
+          const gasPacket = data.latestBySubsystem['air-quality'];
+          const packetAge = now - new Date(gasPacket.timestamp).getTime();
+          if (packetAge < 15000) {
+            espDataFresh = true;
+          }
+
+          const g = gasPacket.payload;
+          const val = g.gasValue ?? g.nilai_gas ?? g.gas ?? gas.gasValue;
+          let statusPolusi: 'UDARA BERSIH' | 'POLUSI SEDANG' | 'POLUSI TINGGI' = 'UDARA BERSIH';
+          if (val < 1000) statusPolusi = 'UDARA BERSIH';
+          else if (val < 1500) statusPolusi = 'POLUSI SEDANG';
+          else statusPolusi = 'POLUSI TINGGI';
+
+          setGas((prev) => ({
+            ...prev,
+            gasValue: val,
+            statusPolusi: g.statusPolusi ?? g.status ?? statusPolusi,
+          }));
+        }
+
+        setIsHardwareConnected(espDataFresh);
+        setIsCameraConnected(camDataFresh);
+
+        if (espDataFresh || camDataFresh) {
+          setLastTelemetryTimestamp(new Date().toLocaleTimeString('id-ID'));
+        }
+
+        // Update Devices status
+        setDevices((prev) =>
+          prev.map((d) => {
+            if (d.id === 'ESP32-MINIATURE' || d.type.includes('Sensor')) {
+              return {
+                ...d,
+                status: espDataFresh ? 'Online' : 'Offline',
+                lastPing: espDataFresh ? 'Live Telemetri' : 'Belum Terhubung',
+              };
+            }
+            if (d.id === 'YOLO-CV-TRAFFIC-01') {
+              return {
+                ...d,
+                status: camDataFresh ? 'Online' : 'Offline',
+                lastPing: camDataFresh ? 'Live Stream Active' : 'Menunggu Feed',
+              };
+            }
+            return d;
+          })
+        );
       } catch (err) {
-        // Silent catch for network hiccups
+        // Silently handled
       }
     };
 
-    const pollInterval = setInterval(syncTelemetry, 1500);
+    const interval = setInterval(syncTelemetry, 2000);
     return () => {
       isMounted = false;
-      clearInterval(pollInterval);
+      clearInterval(interval);
     };
   }, [isLiveIoTMode]);
-
-  // Sustainability score calculated dynamically based on energy, traffic, and air quality
-  const avgPjuBrightness = Math.round(pjuNodes.reduce((acc, curr) => acc + curr.brightness, 0) / (pjuNodes.length || 1));
-  const avgTrafficDensity = Math.round(intersections.reduce((acc, curr) => acc + curr.density, 0) / (intersections.length || 1));
-  const energySavingsComponent = Math.round((100 - avgPjuBrightness) * 0.4);
-  const trafficComponent = Math.round((100 - avgTrafficDensity) * 0.35);
-  const airQualityComponent = Math.round((100 - Math.min(100, airQuality.aqi * 0.7)) * 0.25);
-  const sustainabilityScore = Math.min(99, Math.max(50, 40 + energySavingsComponent + trafficComponent + airQualityComponent));
 
   return (
     <SmartCityContext.Provider
       value={{
         activeSubsystem,
         setActiveSubsystem,
-        intersections,
-        pjuNodes,
-        pedestrians,
-        airQuality,
+        traffic,
+        pju,
+        crossing,
+        gas,
         devices,
         rules,
         alerts,
         eventLogs,
-        selectedDeviceForInspection,
-        setSelectedDeviceForInspection,
-        scenario,
-        setScenario,
         isSimulating,
         setIsSimulating,
         isAudioMuted,
         toggleAudioMute,
-        updateTrafficLightMode,
-        updateTrafficManualPhases,
-        triggerEmergencyCorridor,
-        updatePJUBrightness,
-        togglePJUPower,
-        simulatePJUMotion,
-        triggerPelicanCrossing,
-        toggleAQIMitigation,
-        toggleMistingCannons,
-        toggleRule,
-        updateRuleThreshold,
-        testRule,
-        markAlertAsRead,
-        acknowledgeAlert,
-        resolveAlert,
-        clearResolvedAlerts,
-        restartIoTDevice,
-        pingIoTDevice,
-        sustainabilityScore,
         isLiveIoTMode,
         toggleLiveIoTMode,
         lastTelemetryTimestamp,
+        isHardwareConnected,
+        isCameraConnected,
+        setIsCameraConnected,
+        updateTrafficCameraData,
+        setLdrValue,
+        togglePjuDayNight,
+        triggerCrossingDetection,
+        resetCrossingToSafe,
+        updateUltrasonicDistances,
+        setGasSensorValue,
+        triggerTrafficEmergency,
+        setTrafficModeAuto,
+        toggleRule,
+        markAlertAsRead,
+        resolveAlert,
       }}
     >
       {children}

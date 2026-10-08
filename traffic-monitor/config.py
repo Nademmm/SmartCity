@@ -41,19 +41,28 @@ AGNOSTIC_NMS = os.getenv("AGNOSTIC_NMS", "true").lower() == "true"
 # PERINGATAN: augment=True memperlambat ~2x, aktifkan hanya jika butuh akurasi lebih pada miniatur
 AUGMENT_INFERENCE = os.getenv("AUGMENT_INFERENCE", "false").lower() == "true"
 
-# Mode Filter Khusus Kendaraan (HotWheels, Diecast, Mobil/Motor Miniatur)
-DETECT_ANY_OBJECT = os.getenv("DETECT_ANY_OBJECT", "false").lower() == "true"
+# Mode Filter Deteksi Objek:
+# Set DETECT_ANY_OBJECT = True agar bisa mendeteksi berbagai item/objek nyata di miniatur (orang, mobil, hp, botol, dll)
+DETECT_ANY_OBJECT = os.getenv("DETECT_ANY_OBJECT", "true").lower() == "true"
 
-# KHUSUS KENDARAAN — COCO class IDs:
-# 2=car, 3=motorcycle, 5=bus, 7=truck
-TARGET_CLASSES = [2, 3, 5, 7]
-EXCLUDE_CLASSES = [0, 62, 63, 64, 66, 67]  # 0: Person/Tangan, 63: Laptop, 67: HP/Cellphone
+# COCO class IDs:
+TARGET_CLASSES = [0, 1, 2, 3, 5, 7, 9, 11, 39, 41, 63, 67, 73]
+EXCLUDE_CLASSES = []
 
 CLASS_NAMES = {
+    0: "Person",
+    1: "Bicycle",
     2: "Car",
     3: "Motorcycle",
     5: "Bus",
-    7: "Truck"
+    7: "Truck",
+    9: "Traffic Light",
+    11: "Stop Sign",
+    39: "Bottle",
+    41: "Cup",
+    63: "Laptop",
+    67: "Cell Phone",
+    73: "Book"
 }
 
 # ==============================================================

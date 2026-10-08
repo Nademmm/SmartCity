@@ -4,9 +4,8 @@ import React, { useState } from 'react';
 import { SmartCityProvider, useSmartCity } from '@/context/SmartCityContext';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { Topbar } from '@/components/layout/Topbar';
-import { DeviceInspectorDrawer } from '@/components/common/DeviceInspectorDrawer';
 
-// Views
+// Real Miniature & AI Camera Views
 import { OverviewView } from '@/components/views/OverviewView';
 import { TrafficView } from '@/components/views/TrafficView';
 import { LightingView } from '@/components/views/LightingView';
@@ -14,9 +13,7 @@ import { PedestrianView } from '@/components/views/PedestrianView';
 import { AirQualityView } from '@/components/views/AirQualityView';
 import { IoTDevicesView } from '@/components/views/IoTDevicesView';
 import { AutomationView } from '@/components/views/AutomationView';
-import { AnalyticsView } from '@/components/views/AnalyticsView';
 import { AlertsView } from '@/components/views/AlertsView';
-import { SettingsView } from '@/components/views/SettingsView';
 
 const DashboardContent: React.FC = () => {
   const { activeSubsystem } = useSmartCity();
@@ -38,12 +35,8 @@ const DashboardContent: React.FC = () => {
         return <IoTDevicesView />;
       case 'automation':
         return <AutomationView />;
-      case 'analytics':
-        return <AnalyticsView />;
       case 'alerts':
         return <AlertsView />;
-      case 'settings':
-        return <SettingsView />;
       default:
         return <OverviewView />;
     }
@@ -67,9 +60,6 @@ const DashboardContent: React.FC = () => {
           </div>
         </main>
       </div>
-
-      {/* Global Device Inspector Flyout */}
-      <DeviceInspectorDrawer />
     </div>
   );
 };

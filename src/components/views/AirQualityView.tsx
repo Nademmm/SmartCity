@@ -1,408 +1,272 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import { useSmartCity } from '@/context/SmartCityContext';
 import { MetricCard } from '@/components/common/MetricCard';
+import { TerminalConsole } from '@/components/common/TerminalConsole';
 import {
   Wind,
-  Droplets,
-  Thermometer,
+  ShieldCheck,
   AlertTriangle,
-  ShieldAlert,
-  Zap,
-  RotateCw,
+  Sliders,
   CheckCircle2,
-  X,
-  Navigation,
+  Info,
 } from 'lucide-react';
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  CartesianGrid,
-} from 'recharts';
-
-const AQI_24H_DATA = [
-  { time: '00:00', aqi: 45, pm25: 18 },
-  { time: '03:00', aqi: 40, pm25: 15 },
-  { time: '06:00', aqi: 58, pm25: 28 },
-  { time: '08:00', aqi: 88, pm25: 45 },
-  { time: '11:00', aqi: 76, pm25: 39 },
-  { time: '14:00', aqi: 72, pm25: 38 },
-  { time: '17:00', aqi: 115, pm25: 62 },
-  { time: '19:00', aqi: 95, pm25: 50 },
-  { time: '22:00', aqi: 65, pm25: 32 },
-];
 
 export const AirQualityView: React.FC = () => {
-  const { airQuality, toggleAQIMitigation, toggleMistingCannons } = useSmartCity();
-  const [isMitigationModalOpen, setIsMitigationModalOpen] = useState<boolean>(false);
+  const { gas, setGasSensorValue, isHardwareConnected } = useSmartCity();
 
-  const isUnhealthy = airQuality.aqi > 100;
-
-  const getAqiColor = (aqi: number) => {
-    if (aqi <= 50) return 'text-emerald-400 border-emerald-500/30 bg-emerald-500/15';
-    if (aqi <= 100) return 'text-amber-400 border-amber-500/30 bg-amber-500/15';
-    if (aqi <= 150) return 'text-orange-400 border-orange-500/30 bg-orange-500/15';
-    return 'text-rose-400 border-rose-500/30 bg-rose-500/15';
-  };
+  const isTinggi = gas.statusPolusi === 'POLUSI TINGGI';
+  const isSedang = gas.statusPolusi === 'POLUSI SEDANG';
 
   return (
     <div className="space-y-5">
-      {/* Critical / Unhealthy AQI Alert Banner */}
-      {isUnhealthy && (
-        <div className="p-4 rounded-xl bg-gradient-to-r from-rose-950/50 via-slate-900 to-slate-900 border border-rose-500/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-pulse">
+      {/* Offline Hardware Banner */}
+      {!isHardwareConnected && (
+        <div className="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between text-xs text-slate-300">
+          <div className="flex items-center gap-2.5">
+            <span className="w-2 h-2 rounded-full bg-rose-500" />
+            <span>
+              <strong>Perangkat ESP32 Offline:</strong> Sensor Gas MQ (ADC Pin 39) dalam mode Standby. Colokkan kabel USB dan jalankan kode di Thonny agar pembacaan fisik langsung mengalir.
+            </span>
+          </div>
+          <span className="font-mono text-[10px] bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2 py-0.5 rounded shrink-0">
+            Hardware Belum Terhubung
+          </span>
+        </div>
+      )}
+      {/* Status Warning Banner */}
+      {(isTinggi || isSedang) && (
+        <div
+          className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-pulse transition-all ${
+            isTinggi
+              ? 'bg-rose-950/40 border-rose-500/50'
+              : 'bg-amber-950/40 border-amber-500/50'
+          }`}
+        >
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-lg bg-rose-500/20 text-rose-400 border border-rose-500/40">
+            <div
+              className={`p-2.5 rounded-lg border ${
+                isTinggi
+                  ? 'bg-rose-500/20 text-rose-400 border-rose-500/40'
+                  : 'bg-amber-500/20 text-amber-400 border-amber-500/40'
+              }`}
+            >
               <AlertTriangle className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold uppercase tracking-wider text-rose-400">
-                  AIR QUALITY WARNING • UNSAFE EMISSIONS
+                  PERINGATAN KUALITAS UDARA PERKOTAAN
                 </span>
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500 text-white">
-                  AQI &gt; 100
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                    isTinggi ? 'bg-rose-500 text-white' : 'bg-amber-400 text-black'
+                  }`}
+                >
+                  {gas.statusPolusi}
                 </span>
               </div>
               <h2 className="text-sm font-bold text-white mt-0.5">
-                Kondisi Udara Zona Industri: AQI {airQuality.aqi} ({airQuality.status})
+                Nilai Gas Terbaca: {gas.gasValue} (Sensor Gas/MQ ADC Pin 39)
               </h2>
-              <p className="text-xs text-rose-300/80">
-                Sistem mitigasi otomatis aktif: Urban Misting Cannons menyemprotkan partikulat air dan rute kendaraan berat dialihkan.
+              <p className="text-xs text-slate-300">
+                {isTinggi
+                  ? 'Konsentrasi gas terdeteksi tinggi (>= 1500 ADC). Rekomendasi tindakan peringatan warga.'
+                  : 'Konsentrasi gas terdeteksi pada tingkat sedang (1000 - 1499 ADC). Diperlukan pemantauan berkala.'}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsMitigationModalOpen(true)}
-              className="px-3.5 py-2 rounded-lg bg-rose-500 text-white text-xs font-bold hover:bg-rose-600 transition-all shadow-lg shadow-rose-500/20"
-            >
-              Lihat Prosedur Mitigasi
-            </button>
-          </div>
+          <button
+            onClick={() => setGasSensorValue(650)}
+            className="px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold"
+          >
+            Reset ke Udara Bersih
+          </button>
         </div>
       )}
 
-      {/* KPI Cards: Multi-Gas & Atmospheric Sensors */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      {/* KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard
-          title="Air Quality Index"
-          value={airQuality.aqi}
-          unit="AQI"
-          statusText={airQuality.status}
-          statusVariant={airQuality.aqi > 100 ? 'danger' : airQuality.aqi > 50 ? 'warning' : 'success'}
-          trend={{ value: `${airQuality.pm25} µg/m³ PM2.5`, direction: 'neutral', label: 'PM2.5' }}
+          title="Nilai Sensor Gas / MQ"
+          value={gas.gasValue}
+          unit="ADC"
+          statusText={gas.statusPolusi}
+          statusVariant={isTinggi ? 'danger' : isSedang ? 'warning' : 'success'}
           icon={<Wind className="w-4 h-4" />}
-          footerText="Sensor Array ESP32-003"
+          footerText={`ADC Pin ${gas.pinGas} (Atten 11dB)`}
         />
 
         <MetricCard
-          title="Carbon Monoxide (CO)"
-          value={`${airQuality.co}`}
-          unit="ppm"
-          statusText="Level Aman"
+          title="Status Kualitas Udara"
+          value={gas.statusPolusi}
+          statusText={
+            gas.gasValue < 1000
+              ? 'Nilai < 1000 (Aman)'
+              : gas.gasValue < 1500
+              ? '1000 <= Nilai < 1500'
+              : 'Nilai >= 1500'
+          }
+          statusVariant={isTinggi ? 'danger' : isSedang ? 'warning' : 'success'}
+          icon={<ShieldCheck className="w-4 h-4" />}
+          footerText="Kategori Evaluasi Thonny"
+        />
+
+        <MetricCard
+          title="Ambang Udara Bersih"
+          value="< 1000"
+          unit="ADC"
+          statusText="Batas Aman"
           statusVariant="success"
-          icon={<Droplets className="w-4 h-4" />}
-          footerText="Standar Baku Mutu: &lt; 9 ppm"
+          icon={<CheckCircle2 className="w-4 h-4" />}
+          footerText="Threshold Level 1"
         />
 
         <MetricCard
-          title="Carbon Dioxide (CO2)"
-          value={`${airQuality.co2}`}
-          unit="ppm"
-          statusText="Normal Atmosfer"
-          statusVariant="info"
-          icon={<Wind className="w-4 h-4" />}
-          footerText="Baseline Global: 420 ppm"
-        />
-
-        <MetricCard
-          title="Nitrogen Dioxide (NO2)"
-          value={`${airQuality.no2}`}
-          unit="ppb"
-          statusText="Emisi Kendaraan"
-          statusVariant="info"
-          icon={<Wind className="w-4 h-4" />}
-          footerText="Ambang Batas: 100 ppb"
-        />
-
-        <MetricCard
-          title="Suhu & Kelembapan"
-          value={`${airQuality.temperature}°C`}
-          unit={`/ ${airQuality.humidity}%`}
-          statusText="Tropis Lembap"
-          statusVariant="neutral"
-          icon={<Thermometer className="w-4 h-4" />}
-          footerText="Sensor DHT22 / SHT31"
+          title="Ambang Polusi Tinggi"
+          value=">= 1500"
+          unit="ADC"
+          statusText="Batas Bahaya"
+          statusVariant="danger"
+          icon={<AlertTriangle className="w-4 h-4" />}
+          footerText="Threshold Level 2"
         />
       </div>
 
-      {/* Main Grid: 24h AQI Chart & Mitigation Action Control Panel */}
+      {/* Main Grid: Gas Gauge & Live Terminal Output */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Left: 24h Real-Time AQI Trend */}
-        <div className="lg:col-span-7 glass-panel rounded-2xl p-5 flex flex-col justify-between">
-          <div>
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-slate-800">
-              <div>
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                  Air Quality Index (AQI) - 24 Jam
-                </h3>
-                <p className="text-xs text-slate-400">Tren polutan PM2.5 dan indeks kualitas udara terpadu.</p>
-              </div>
-              <div className="flex items-center gap-3 text-xs">
-                <span className="flex items-center gap-1 text-cyan-400">
-                  <span className="w-2.5 h-2.5 rounded-full bg-cyan-400" /> AQI
-                </span>
-                <span className="flex items-center gap-1 text-emerald-400">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" /> PM2.5 (µg/m³)
-                </span>
-              </div>
-            </div>
-
-            <div className="w-full h-64 mt-4">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={AQI_24H_DATA} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="aqiGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#06B6D4" stopOpacity={0.4} />
-                      <stop offset="95%" stopColor="#06B6D4" stopOpacity={0.0} />
-                    </linearGradient>
-                    <linearGradient id="pm25Gradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10B981" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#10B981" stopOpacity={0.0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                  <XAxis dataKey="time" stroke="#64748B" fontSize={11} />
-                  <YAxis stroke="#64748B" fontSize={11} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#0D1527',
-                      borderColor: '#1E293B',
-                      borderRadius: '8px',
-                      color: '#F8FAFC',
-                      fontSize: '12px',
-                    }}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="aqi"
-                    stroke="#06B6D4"
-                    strokeWidth={2}
-                    fillOpacity={1}
-                    fill="url(#aqiGradient)"
-                    name="AQI"
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="pm25"
-                    stroke="#10B981"
-                    strokeWidth={2}
-                    fillOpacity={1}
-                    fill="url(#pm25Gradient)"
-                    name="PM2.5 (µg/m³)"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          {/* Standards Scale */}
-          <div className="mt-4 pt-4 border-t border-slate-800 grid grid-cols-4 gap-2 text-center text-[10px]">
-            <div className="p-2 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 font-bold">
-              0 - 50: Baik (Good)
-            </div>
-            <div className="p-2 rounded bg-amber-500/15 border border-amber-500/30 text-amber-400 font-bold">
-              51 - 100: Sedang (Moderate)
-            </div>
-            <div className="p-2 rounded bg-orange-500/15 border border-orange-500/30 text-orange-400 font-bold">
-              101 - 150: Tidak Sehat
-            </div>
-            <div className="p-2 rounded bg-rose-500/15 border border-rose-500/30 text-rose-400 font-bold">
-              &gt; 150: Sangat Tidak Sehat
-            </div>
-          </div>
-        </div>
-
-        {/* Right: Active Mitigation Response System */}
-        <div className="lg:col-span-5 glass-panel rounded-2xl p-5 flex flex-col justify-between">
+        {/* Left: Interactive Gas Gauge & Slider */}
+        <div className="lg:col-span-6 glass-panel rounded-2xl p-5 flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2">
-                <ShieldAlert className="w-4 h-4 text-cyan-400" />
+                <span className={`w-2.5 h-2.5 rounded-full ${isTinggi ? 'bg-rose-500 animate-ping' : isSedang ? 'bg-amber-400' : 'bg-emerald-400'}`} />
                 <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                  Automated Mitigation System
+                  Visualisasi Pembacaan Sensor Gas
                 </h3>
               </div>
-              <span
-                className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                  airQuality.mitigationActive
-                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                    : 'bg-slate-800 text-slate-400'
-                }`}
-              >
-                {airQuality.mitigationActive ? 'Mitigasi AKTIF' : 'Standby'}
+              <span className="text-xs font-mono text-cyan-300 bg-slate-900 px-2.5 py-0.5 rounded border border-slate-800">
+                ADC Pin 39
               </span>
             </div>
 
-            <div className="my-4 space-y-3">
-              {/* Action 1: Urban Misting Cannons */}
-              <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div
-                    className={`p-2 rounded-lg border ${
-                      airQuality.mistingCannonsActive
-                        ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-300'
-                        : 'bg-slate-800 border-slate-700 text-slate-500'
-                    }`}
-                  >
-                    <Droplets className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <div className="text-xs font-bold text-white">Urban Misting Cannons</div>
-                    <div className="text-[10px] text-slate-400">Penyemprotan kabut air pengikat partikulat PM2.5</div>
-                  </div>
-                </div>
+            {/* Visual Gauge Display */}
+            <div className="my-5 p-6 rounded-2xl bg-[#070D1A] border border-slate-800 flex flex-col items-center justify-center relative overflow-hidden">
+              <div
+                className="w-28 h-28 rounded-full border-4 flex flex-col items-center justify-center transition-all duration-500 shadow-2xl"
+                style={{
+                  borderColor: isTinggi ? '#F43F5E' : isSedang ? '#F59E0B' : '#10B981',
+                  backgroundColor: isTinggi
+                    ? 'rgba(244, 63, 94, 0.15)'
+                    : isSedang
+                    ? 'rgba(245, 158, 11, 0.15)'
+                    : 'rgba(16, 185, 129, 0.15)',
+                  boxShadow: isTinggi
+                    ? '0 0 30px rgba(244, 63, 94, 0.4)'
+                    : isSedang
+                    ? '0 0 25px rgba(245, 158, 11, 0.3)'
+                    : '0 0 20px rgba(16, 185, 129, 0.2)',
+                }}
+              >
+                <Wind
+                  className="w-10 h-10 transition-colors"
+                  style={{
+                    color: isTinggi ? '#FDA4AF' : isSedang ? '#FDE68A' : '#6EE7B7',
+                  }}
+                />
+              </div>
 
-                <button
-                  onClick={toggleMistingCannons}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
-                    airQuality.mistingCannonsActive
-                      ? 'bg-emerald-500 text-black border-emerald-400'
-                      : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
-                  }`}
+              <div className="mt-4 text-center">
+                <div className="text-3xl font-black text-white font-mono">{gas.gasValue}</div>
+                <div
+                  className="text-xs font-bold tracking-wider uppercase mt-1"
+                  style={{ color: isTinggi ? '#FB7185' : isSedang ? '#FBBF24' : '#34D399' }}
                 >
-                  {airQuality.mistingCannonsActive ? 'ON' : 'OFF'}
-                </button>
-              </div>
-
-              {/* Action 2: Traffic Diversion Recommendation */}
-              <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div
-                    className={`p-2 rounded-lg border ${
-                      airQuality.trafficDiversionRecommended
-                        ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
-                        : 'bg-slate-800 border-slate-700 text-slate-500'
-                    }`}
-                  >
-                    <Navigation className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <div className="text-xs font-bold text-white">Pengalihan Truk & Kendaraan Berat</div>
-                    <div className="text-[10px] text-slate-400">Reroute via Jalan Lingkar Luar Kota</div>
-                  </div>
+                  {gas.statusPolusi}
                 </div>
-
-                <span
-                  className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase ${
-                    airQuality.trafficDiversionRecommended
-                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                      : 'bg-slate-800 text-slate-500'
-                  }`}
-                >
-                  {airQuality.trafficDiversionRecommended ? 'DIREKOMENDASIKAN' : 'NORMAL'}
-                </span>
-              </div>
-
-              {/* Action 3: Public Health Advisory Broadcast */}
-              <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-slate-800 border border-slate-700 text-cyan-400">
-                    <Wind className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <div className="text-xs font-bold text-white">Broadcast Aplikasi Warga</div>
-                    <div className="text-[10px] text-slate-400">Himbauan penggunaan masker di area industri</div>
-                  </div>
+                <div className="text-[11px] text-slate-400 mt-0.5">
+                  ADC 12-Bit Input (Rentang: 0 - 4095)
                 </div>
-
-                <span className="px-2.5 py-1 rounded text-[10px] font-bold bg-slate-800 text-slate-400">
-                  SIAP BROADCAST
-                </span>
               </div>
+            </div>
+
+            {/* Slider Kontrol Simulasi Gas */}
+            <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
+              <div className="flex justify-between text-xs text-slate-300 font-semibold">
+                <span>Atur Nilai ADC Sensor Gas:</span>
+                <span className="font-mono text-cyan-400 font-bold">{gas.gasValue}</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="4095"
+                value={gas.gasValue}
+                onChange={(e) => setGasSensorValue(Number(e.target.value))}
+                className="w-full accent-cyan-400 cursor-pointer"
+              />
+              <div className="flex justify-between text-[10px] text-slate-400 font-mono">
+                <span className="text-emerald-400">0 - 999 (Bersih)</span>
+                <span className="text-amber-400">1000 - 1499 (Sedang)</span>
+                <span className="text-rose-400">&gt;= 1500 (Tinggi)</span>
+              </div>
+            </div>
+
+            {/* Preset Buttons */}
+            <div className="grid grid-cols-3 gap-2 mt-4">
+              <button
+                onClick={() => setGasSensorValue(650)}
+                className="py-2 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-xs font-semibold"
+              >
+                Set Bersih (650)
+              </button>
+              <button
+                onClick={() => setGasSensorValue(1250)}
+                className="py-2 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-semibold"
+              >
+                Set Sedang (1250)
+              </button>
+              <button
+                onClick={() => setGasSensorValue(2100)}
+                className="py-2 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-xs font-semibold"
+              >
+                Set Tinggi (2100)
+              </button>
             </div>
           </div>
 
-          {/* Master Toggle Mitigation */}
-          <div className="mt-4 pt-4 border-t border-slate-800">
-            <button
-              onClick={toggleAQIMitigation}
-              className={`w-full py-2.5 rounded-xl font-bold text-xs border transition-all flex items-center justify-center gap-2 ${
-                airQuality.mitigationActive
-                  ? 'bg-emerald-500 text-black border-emerald-400 shadow-lg shadow-emerald-500/20'
-                  : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
-              }`}
-            >
-              <Zap className="w-4 h-4" />
-              <span>
-                {airQuality.mitigationActive
-                  ? 'DEAKTIVASI SISTEM MITIGASI (KEMBALI NORMAL)'
-                  : 'AKTIFKAN SISTEM MITIGASI DARURAT SEKARANG'}
-              </span>
-            </button>
+          <div className="mt-4 pt-3 border-t border-slate-800 text-xs text-slate-400 flex items-center gap-2">
+            <Info className="w-4 h-4 text-cyan-400 shrink-0" />
+            <span>
+              Sensor gas MQ membaca gas analog. Hasil ADC 12-bit diklasifikasikan ke dalam 3 tingkatan status.
+            </span>
+          </div>
+        </div>
+
+        {/* Right: Real Live Terminal Shell Output (Replacing static code snippet) */}
+        <div className="lg:col-span-6 flex flex-col justify-between">
+          <TerminalConsole
+            filterFeature="polusi"
+            title="Live Serial Terminal Output (Sensor Gas / MQ)"
+            maxHeight="max-h-[380px]"
+          />
+
+          <div className="mt-4 p-4 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between text-xs">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              <span className="text-white font-semibold">Spesifikasi Sensor:</span>
+            </div>
+            <div className="flex items-center gap-3 font-mono text-slate-300">
+              <span>Sensor Gas / MQ</span>
+              <span>•</span>
+              <span>ADC Pin 39</span>
+              <span>•</span>
+              <span>Atten 11dB</span>
+            </div>
           </div>
         </div>
       </div>
-
-      {/* Mitigation Action Plan Modal */}
-      {isMitigationModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-lg rounded-2xl bg-[#0D1527] border border-cyan-500/40 p-6 shadow-2xl space-y-4">
-            <div className="flex items-start justify-between pb-3 border-b border-slate-800">
-              <div>
-                <span className="text-[10px] font-mono font-bold text-cyan-400 uppercase tracking-wider">
-                  SOP Standar Operasional Prosedur
-                </span>
-                <h3 className="text-base font-bold text-white">Mitigasi Polusi Udara Smart City</h3>
-              </div>
-              <button
-                onClick={() => setIsMitigationModalOpen(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-3 text-xs text-slate-300">
-              <div className="p-3 rounded-lg bg-slate-900 border border-slate-800">
-                <div className="font-bold text-cyan-300 mb-1">Tahap 1: Pengaktifan Misting Cannon Otomatis</div>
-                <p className="text-slate-400">
-                  ESP32 Air Station mengirim sinyal MQTT untuk menyalakan relay pompa air bertekanan tinggi guna menurunkan partikulat PM2.5 di udara terbuka.
-                </p>
-              </div>
-
-              <div className="p-3 rounded-lg bg-slate-900 border border-slate-800">
-                <div className="font-bold text-amber-300 mb-1">Tahap 2: Rekayasa Lalu Lintas & Reroute</div>
-                <p className="text-slate-400">
-                  Variable Message Sign (VMS) digital menginstruksikan truk angkutan berat untuk melewati jalur lingkar luar, mengurangi penumpukan emisi NOx.
-                </p>
-              </div>
-
-              <div className="p-3 rounded-lg bg-slate-900 border border-slate-800">
-                <div className="font-bold text-emerald-300 mb-1">Tahap 3: Pemantauan Normalisasi</div>
-                <p className="text-slate-400">
-                  Ketika sensor MQ-135 / PMS5003 mendeteksi AQI &lt; 80 selama 15 menit berturut-turut, status darurat otomatis dicabut.
-                </p>
-              </div>
-            </div>
-
-            <div className="pt-3 border-t border-slate-800 flex justify-end">
-              <button
-                onClick={() => setIsMitigationModalOpen(false)}
-                className="px-4 py-2 rounded-lg bg-cyan-500 text-white font-semibold text-xs hover:bg-cyan-600"
-              >
-                Tutup Panduan
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
