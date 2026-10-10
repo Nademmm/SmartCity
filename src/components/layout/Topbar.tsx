@@ -75,7 +75,7 @@ export const Topbar: React.FC<TopbarProps> = ({ onOpenMobileMenu }) => {
       case 'alerts':
         return 'Notifikasi & Log Peristiwa';
       default:
-        return 'UrbanPulse Dashboard';
+        return 'Smart City Dashboard';
     }
   };
 

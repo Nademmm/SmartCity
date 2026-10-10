@@ -42,6 +42,8 @@ export interface SmartPJUData {
   pinLdr: number; // 36
   pinLedMerah: number; // 25
   pinLedPutih: number; // 26
+  jamTerakhirBeralih?: string; // Waktu terakhir beralih kondisi (contoh: "18:15:20 WIB")
+  siklusWaktu?: 'SIANG' | 'MALAM';
 }
 
 // Fitur 2: Smart Penyeberangan (2 Ultrasonik, LED Hijau/Kuning/Merah, Buzzer)
@@ -76,6 +78,9 @@ export interface GasAirQualityData {
   pinGas: number; // 39
   thresholdBersih: number; // 1000
   thresholdSedang: number; // 1500
+  isAlarmActive?: boolean;
+  isAlarmMuted?: boolean;
+  lastAlarmTime?: string;
 }
 
 export type DeviceType = 

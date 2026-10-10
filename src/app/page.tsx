@@ -15,6 +15,8 @@ import { IoTDevicesView } from '@/components/views/IoTDevicesView';
 import { AutomationView } from '@/components/views/AutomationView';
 import { AlertsView } from '@/components/views/AlertsView';
 
+import { PollutionAlarmModal } from '@/components/common/PollutionAlarmModal';
+
 const DashboardContent: React.FC = () => {
   const { activeSubsystem } = useSmartCity();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -44,6 +46,9 @@ const DashboardContent: React.FC = () => {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#070B14]">
+      {/* Pollution Emergency Alarm Modal & Strobe */}
+      <PollutionAlarmModal />
+
       {/* Navigation Sidebar */}
       <Sidebar
         isOpen={isMobileMenuOpen}

@@ -277,7 +277,7 @@ export const OverviewView: React.FC = () => {
                     Sensor LDR (Pin 36) & LED Merah/Putih
                   </div>
                   <div className="text-[11px] text-slate-300 mt-1 font-mono">
-                    LDR: {pju.ldrValue} • PJU: {pju.pjuStatus}
+                    LDR: {pju.ldrValue} • {pju.kondisi} ({pju.pjuStatus}) • {pju.jamTerakhirBeralih || 'Real-time'}
                   </div>
                 </div>
 

@@ -66,6 +66,9 @@ interface SmartCityContextType {
 
   // Gas Action Handlers
   setGasSensorValue: (value: number) => void;
+  isPollutionAlarmActive: boolean;
+  dismissPollutionAlarm: () => void;
+  snoozePollutionAlarm: () => void;
 
   // Traffic Action Handlers
   triggerTrafficEmergency: () => void;
@@ -86,6 +89,8 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   const [pju, setPju] = useState<SmartPJUData>(INITIAL_PJU);
   const [crossing, setCrossing] = useState<SmartCrossingData>(INITIAL_CROSSING);
   const [gas, setGas] = useState<GasAirQualityData>(INITIAL_GAS);
+  const [isPollutionAlarmActive, setIsPollutionAlarmActive] = useState<boolean>(false);
+  const [alarmSnoozeUntil, setAlarmSnoozeUntil] = useState<number>(0);
 
   const [devices, setDevices] = useState<IoTDevice[]>(INITIAL_DEVICES);
   const [rules, setRules] = useState<AutomationRule[]>(INITIAL_RULES);
@@ -155,18 +160,25 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   // ==========================================================
   const setLdrValue = useCallback((value: number) => {
     const isDark = value > 2000;
-    setPju((prev) => ({
-      ...prev,
-      ldrValue: value,
-      kondisi: isDark ? 'GELAP' : 'TERANG',
-      pjuStatus: isDark ? 'MENYALA' : 'MATI',
-      ledMerah: isDark,
-      ledPutih: isDark,
-    }));
+    const nowTime = new Date().toLocaleTimeString('id-ID', { hour12: false }) + ' WIB';
+    setPju((prev) => {
+      const conditionChanged = (isDark ? 'GELAP' : 'TERANG') !== prev.kondisi;
+      return {
+        ...prev,
+        ldrValue: value,
+        kondisi: isDark ? 'GELAP' : 'TERANG',
+        pjuStatus: isDark ? 'MENYALA' : 'MATI',
+        ledMerah: isDark,
+        ledPutih: isDark,
+        jamTerakhirBeralih: conditionChanged ? nowTime : prev.jamTerakhirBeralih,
+        siklusWaktu: isDark ? 'MALAM' : 'SIANG',
+      };
+    });
   }, []);
 
   const togglePjuDayNight = useCallback(() => {
     sounds.playClick();
+    const nowTime = new Date().toLocaleTimeString('id-ID', { hour12: false }) + ' WIB';
     setPju((prev) => {
       const isCurrentlyDark = prev.kondisi === 'GELAP';
       const newLdr = isCurrentlyDark ? 1100 : 2850;
@@ -178,6 +190,8 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
         pjuStatus: isDark ? 'MENYALA' : 'MATI',
         ledMerah: isDark,
         ledPutih: isDark,
+        jamTerakhirBeralih: nowTime,
+        siklusWaktu: isDark ? 'MALAM' : 'SIANG',
       };
     });
     addEventLog('Smart PJU', 'Kondisi Cahaya LDR Disimulasikan', 'Uji coba manual nilai LDR diaktifkan', 'MANUAL');
@@ -280,6 +294,17 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   // ==========================================================
   // FITUR 1: MONITORING POLUSI UDARA (Sensor Gas / MQ ADC Pin 39)
   // ==========================================================
+  const dismissPollutionAlarm = useCallback(() => {
+    sounds.stopPollutionAlarm();
+    setIsPollutionAlarmActive(false);
+  }, []);
+
+  const snoozePollutionAlarm = useCallback(() => {
+    sounds.stopPollutionAlarm();
+    setIsPollutionAlarmActive(false);
+    setAlarmSnoozeUntil(Date.now() + 30000); // Tunda selama 30 detik
+  }, []);
+
   const setGasSensorValue = useCallback(
     (value: number) => {
       let statusPolusi: 'UDARA BERSIH' | 'POLUSI SEDANG' | 'POLUSI TINGGI' = 'UDARA BERSIH';
@@ -291,19 +316,33 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
         statusPolusi = 'POLUSI TINGGI';
       }
 
+      const nowTime = new Date().toLocaleTimeString('id-ID', { hour12: false }) + ' WIB';
+
       setGas((prev) => ({
         ...prev,
         gasValue: value,
         statusPolusi,
+        isAlarmActive: statusPolusi === 'POLUSI TINGGI',
+        lastAlarmTime: statusPolusi === 'POLUSI TINGGI' ? nowTime : prev.lastAlarmTime,
       }));
 
       if (value >= 1500) {
-        addAlert('CRITICAL', 'Sensor Gas MQ', 'Peringatan Polusi Udara Tinggi', `Nilai Gas ADC mencapai ${value}`);
+        addAlert('CRITICAL', 'Sensor Gas MQ', 'Peringatan Polusi Udara Tinggi!', `Nilai Gas ADC mencapai ${value}. Protokol alarm darurat aktif.`);
+        if (Date.now() > alarmSnoozeUntil) {
+          setIsPollutionAlarmActive(true);
+          sounds.startPollutionAlarm();
+        }
       } else if (value >= 1000) {
-        addAlert('WARNING', 'Sensor Gas MQ', 'Polusi Udara Sedang', `Nilai Gas ADC mencapai ${value}`);
+        sounds.stopPollutionAlarm();
+        setIsPollutionAlarmActive(false);
+        addAlert('WARNING', 'Sensor Gas MQ', 'Polusi Udara Sedang', `Nilai Gas ADC mencapai ${value}. Terdeteksi peningkatan asap/emisi.`);
+        sounds.playAlert();
+      } else {
+        sounds.stopPollutionAlarm();
+        setIsPollutionAlarmActive(false);
       }
     },
-    [addAlert]
+    [addAlert, alarmSnoozeUntil]
   );
 
   // ==========================================================
@@ -541,11 +580,29 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
           else if (val < 1500) statusPolusi = 'POLUSI SEDANG';
           else statusPolusi = 'POLUSI TINGGI';
 
+          const nowTime = new Date().toLocaleTimeString('id-ID', { hour12: false }) + ' WIB';
+
           setGas((prev) => ({
             ...prev,
             gasValue: val,
             statusPolusi: g.statusPolusi ?? g.status ?? statusPolusi,
+            isAlarmActive: statusPolusi === 'POLUSI TINGGI',
+            lastAlarmTime: statusPolusi === 'POLUSI TINGGI' ? nowTime : prev.lastAlarmTime,
           }));
+
+          if (statusPolusi === 'POLUSI TINGGI') {
+            if (Date.now() > alarmSnoozeUntil) {
+              setIsPollutionAlarmActive(true);
+              sounds.startPollutionAlarm();
+            }
+          } else if (statusPolusi === 'POLUSI SEDANG') {
+            sounds.stopPollutionAlarm();
+            setIsPollutionAlarmActive(false);
+            sounds.playAlert();
+          } else {
+            sounds.stopPollutionAlarm();
+            setIsPollutionAlarmActive(false);
+          }
         }
 
         setIsHardwareConnected(espDataFresh);
@@ -585,7 +642,7 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
       isMounted = false;
       clearInterval(interval);
     };
-  }, [isLiveIoTMode]);
+  }, [isLiveIoTMode, alarmSnoozeUntil]);
 
   return (
     <SmartCityContext.Provider
@@ -617,6 +674,9 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
         resetCrossingToSafe,
         updateUltrasonicDistances,
         setGasSensorValue,
+        isPollutionAlarmActive,
+        dismissPollutionAlarm,
+        snoozePollutionAlarm,
         triggerTrafficEmergency,
         setTrafficModeAuto,
         toggleRule,

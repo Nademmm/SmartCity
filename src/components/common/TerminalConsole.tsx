@@ -55,7 +55,7 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
 
     if (filterFeature === 'all') {
       lines.push(`================================`);
-      lines.push(`    URBANPULSE SMART CITY`);
+      lines.push(`     SMART CITY IOT SYSTEM`);
       lines.push(`================================`);
       lines.push(``);
       lines.push(`MONITORING POLUSI`);
@@ -201,7 +201,7 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
           <div className="text-slate-500 italic py-4">Menunggu output telemetri dari serial Thonny...</div>
         ) : (
           logs.map((line, idx) => {
-            const isHeader = line.includes('===') || line.includes('URBANPULSE');
+            const isHeader = line.includes('===') || line.includes('SMART CITY') || line.includes('URBANPULSE');
             const isOffline = line.includes('[STATUS] ESP32') || line.includes('OFFLINE');
             const isAlert = line.includes('>>>') || line.includes('POLUSI TINGGI') || line.includes('LAMPU MERAH');
             const isGood = line.includes('UDARA BERSIH') || line.includes('AMAN') || line.includes('HIJAU') || line.includes('[CONNECTED]');

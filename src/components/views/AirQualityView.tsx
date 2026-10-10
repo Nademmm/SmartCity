@@ -35,12 +35,12 @@ export const AirQualityView: React.FC = () => {
           </span>
         </div>
       )}
-      {/* Status Warning Banner */}
+      {/* Status Warning Banner (Sedang & Tinggi) */}
       {(isTinggi || isSedang) && (
         <div
-          className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-pulse transition-all ${
+          className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-all ${
             isTinggi
-              ? 'bg-rose-950/40 border-rose-500/50'
+              ? 'bg-rose-950/40 border-rose-500/50 animate-pulse'
               : 'bg-amber-950/40 border-amber-500/50'
           }`}
         >
@@ -57,7 +57,7 @@ export const AirQualityView: React.FC = () => {
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold uppercase tracking-wider text-rose-400">
-                  PERINGATAN KUALITAS UDARA PERKOTAAN
+                  {isTinggi ? 'KODE MERAH: POLUSI UDARA TINGGI' : 'PERINGATAN: POLUSI UDARA TINGKAT SEDANG'}
                 </span>
                 <span
                   className={`px-2 py-0.5 rounded text-[10px] font-bold ${
@@ -66,24 +66,31 @@ export const AirQualityView: React.FC = () => {
                 >
                   {gas.statusPolusi}
                 </span>
+                {gas.lastAlarmTime && (
+                  <span className="text-[10px] font-mono text-slate-400">
+                    Pukul: {gas.lastAlarmTime}
+                  </span>
+                )}
               </div>
               <h2 className="text-sm font-bold text-white mt-0.5">
-                Nilai Gas Terbaca: {gas.gasValue} (Sensor Gas/MQ ADC Pin 39)
+                Nilai Gas Terbaca: {gas.gasValue} ADC (Sensor MQ ADC Pin 39)
               </h2>
               <p className="text-xs text-slate-300">
                 {isTinggi
-                  ? 'Konsentrasi gas terdeteksi tinggi (>= 1500 ADC). Rekomendasi tindakan peringatan warga.'
-                  : 'Konsentrasi gas terdeteksi pada tingkat sedang (1000 - 1499 ADC). Diperlukan pemantauan berkala.'}
+                  ? 'Konsentrasi gas melebihi ambang batas bahaya (>= 1500 ADC). Sirine darurat synthesizer aktif di sistem.'
+                  : 'Konsentrasi gas terdeteksi meningkat (1000 - 1499 ADC). Disarankan sirkulasi udara maket dipantau.'}
               </p>
             </div>
           </div>
 
-          <button
-            onClick={() => setGasSensorValue(650)}
-            className="px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold"
-          >
-            Reset ke Udara Bersih
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setGasSensorValue(650)}
+              className="px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold transition-colors cursor-pointer"
+            >
+              Reset ke Udara Bersih
+            </button>
+          </div>
         </div>
       )}
 
@@ -214,25 +221,32 @@ export const AirQualityView: React.FC = () => {
             </div>
 
             {/* Preset Buttons */}
-            <div className="grid grid-cols-3 gap-2 mt-4">
-              <button
-                onClick={() => setGasSensorValue(650)}
-                className="py-2 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-xs font-semibold"
-              >
-                Set Bersih (650)
-              </button>
-              <button
-                onClick={() => setGasSensorValue(1250)}
-                className="py-2 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-semibold"
-              >
-                Set Sedang (1250)
-              </button>
-              <button
-                onClick={() => setGasSensorValue(2100)}
-                className="py-2 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-xs font-semibold"
-              >
-                Set Tinggi (2100)
-              </button>
+            <div className="space-y-2 mt-4">
+              <span className="text-[11px] font-mono font-bold text-slate-400 uppercase">
+                Uji Coba Level & Notifikasi Alarm:
+              </span>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  onClick={() => setGasSensorValue(650)}
+                  className="py-2 px-2 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-xs font-semibold cursor-pointer transition-colors"
+                >
+                  Bersih (650)
+                </button>
+                <button
+                  onClick={() => setGasSensorValue(1250)}
+                  className="py-2 px-2 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-semibold cursor-pointer transition-colors"
+                  title="Picu Notifikasi Polusi Sedang"
+                >
+                  Sedang (1250)
+                </button>
+                <button
+                  onClick={() => setGasSensorValue(2100)}
+                  className="py-2 px-2 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs font-bold shadow-lg shadow-rose-500/20 cursor-pointer transition-colors animate-pulse"
+                  title="Picu Alarm Darurat Polusi Tinggi & Sirine"
+                >
+                  Tinggi / Alarm (2100)
+                </button>
+              </div>
             </div>
           </div>
 

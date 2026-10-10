@@ -71,9 +71,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
               </div>
               <div>
                 <h1 className="text-base font-extrabold tracking-tight text-white flex items-center gap-1.5">
-                  Urban<span className="text-cyan-400">Pulse</span>
+                  Smart<span className="text-cyan-400">City</span>
                 </h1>
-                <p className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Miniatur IoT Smart City</p>
+                <p className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Miniatur IoT Dashboard</p>
               </div>
             </div>
 

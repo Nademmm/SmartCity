@@ -14,6 +14,8 @@ import {
   Layers,
   Sparkles,
   SlidersHorizontal,
+  Lock,
+  RefreshCw,
 } from 'lucide-react';
 
 interface VideoDevice {
@@ -121,6 +123,7 @@ export const LiveWebcamFeed: React.FC = () => {
   const [activeCameraLabel, setActiveCameraLabel] = useState<string>('');
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isPermissionDenied, setIsPermissionDenied] = useState<boolean>(false);
   const [showAiOverlay, setShowAiOverlay] = useState<boolean>(true);
   const [activeFps, setActiveFps] = useState<number>(30);
   const [isModelLoading, setIsModelLoading] = useState<boolean>(true);
@@ -222,6 +225,7 @@ export const LiveWebcamFeed: React.FC = () => {
   // 3. Start camera stream
   const startCamera = useCallback(async (deviceIdToUse?: string) => {
     setErrorMessage(null);
+    setIsPermissionDenied(false);
     try {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
@@ -232,7 +236,7 @@ export const LiveWebcamFeed: React.FC = () => {
       const constraints: MediaStreamConstraints = {
         video: targetId
           ? {
-              deviceId: { exact: targetId },
+              deviceId: { ideal: targetId },
               width: { ideal: 1280 },
               height: { ideal: 720 },
               frameRate: { ideal: 30 },
@@ -278,14 +282,23 @@ export const LiveWebcamFeed: React.FC = () => {
         setSelectedDeviceId(refreshedDevices[0].deviceId);
       }
     } catch (err: any) {
-      console.error('Error saat mengakses kamera:', err);
       setIsStreaming(false);
       setIsCameraConnected(false);
-      if (err.name === 'NotAllowedError') {
-        setErrorMessage('Izin kamera ditolak. Silakan izinkan akses kamera di ikon gembok browser.');
+
+      const isDenied =
+        err.name === 'NotAllowedError' ||
+        err.name === 'PermissionDeniedError' ||
+        (err.message && err.message.toLowerCase().includes('denied'));
+
+      if (isDenied) {
+        console.warn('Izin kamera belum diizinkan atau diblokir browser:', err.message);
+        setIsPermissionDenied(true);
+        setErrorMessage('Izin kamera diblokir browser. Klik ikon gembok pada address bar untuk mengizinkan kamera.');
       } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        console.warn('Kamera tidak ditemukan:', err.message);
         setErrorMessage('Kamera webcam tidak ditemukan. Pastikan USB webcam sudah dicolokkan ke laptop.');
       } else {
+        console.warn('Error saat mengakses kamera:', err);
         setErrorMessage(`Gagal membuka webcam: ${err.message || 'Kamera sedang dipakai aplikasi lain'}`);
       }
     }
@@ -331,9 +344,35 @@ export const LiveWebcamFeed: React.FC = () => {
     setDetectedItems([]);
   }, [setIsCameraConnected]);
 
-  // Initial auto mount
+  // Initial auto mount with permission check
   useEffect(() => {
-    startCamera();
+    if (typeof navigator !== 'undefined' && navigator.permissions && navigator.permissions.query) {
+      navigator.permissions
+        .query({ name: 'camera' as PermissionName })
+        .then((permissionStatus) => {
+          if (permissionStatus.state === 'denied') {
+            setIsPermissionDenied(true);
+            setErrorMessage('Izin kamera diblokir browser. Klik ikon gembok pada address bar untuk mengizinkan kamera.');
+          } else {
+            startCamera();
+          }
+
+          permissionStatus.onchange = () => {
+            if (permissionStatus.state === 'granted') {
+              setIsPermissionDenied(false);
+              setErrorMessage(null);
+              startCamera();
+            } else if (permissionStatus.state === 'denied') {
+              setIsPermissionDenied(true);
+            }
+          };
+        })
+        .catch(() => {
+          startCamera();
+        });
+    } else {
+      startCamera();
+    }
 
     return () => {
       if (streamRef.current) {
@@ -343,7 +382,7 @@ export const LiveWebcamFeed: React.FC = () => {
         clearInterval(detectionLoopRef.current);
       }
     };
-  }, []);
+  }, [startCamera]);
 
   // 6. REAL OBJECT DETECTION LOOP (Berjalan setiap ~250ms langsung dari video element)
   useEffect(() => {
@@ -592,34 +631,67 @@ export const LiveWebcamFeed: React.FC = () => {
 
         {/* Fallback / Offline Standby Screen */}
         {!isStreaming && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center space-y-3 bg-[#030712]/95 z-10">
-            <div className="w-16 h-16 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-500 shadow-xl">
-              <Camera className="w-8 h-8 text-cyan-400" />
-            </div>
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center space-y-4 bg-[#030712]/95 z-10 backdrop-blur-sm">
+            {isPermissionDenied ? (
+              <div className="max-w-md p-5 rounded-2xl bg-amber-950/40 border border-amber-500/40 text-left space-y-3 shadow-2xl">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
+                    <Lock className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-white">Izin Akses Kamera Diblokir Browser</h4>
+                    <p className="text-xs text-amber-300/80">Browser memblokir permintaan akses webcam otomatis.</p>
+                  </div>
+                </div>
 
-            <div className="max-w-md">
-              <h4 className="text-base font-bold text-white tracking-tight">Kamera Laptop / USB Siap Digunakan</h4>
-              <p className="text-xs text-slate-400 mt-1">
-                Kamera mendeteksi berbagai jenis item nyata secara instan di browser menggunakan TensorFlow AI Vision.
-              </p>
-            </div>
+                <div className="space-y-1.5 text-xs text-slate-300 bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
+                  <p className="font-semibold text-slate-200">Cara mengizinkan webcam di browser:</p>
+                  <ol className="list-decimal list-inside space-y-1.5 text-slate-400">
+                    <li>Klik ikon <span className="text-amber-300 font-medium">Gembok / Izin Situs</span> di sebelah kiri URL (<code className="text-cyan-400">localhost:3000</code>).</li>
+                    <li>Ubah setelan <span className="text-white font-medium">Kamera (Camera)</span> menjadi <span className="text-emerald-400 font-semibold">Allow (Izinkan)</span>.</li>
+                    <li>Klik tombol di bawah ini untuk mengaktifkan kamera.</li>
+                  </ol>
+                </div>
 
-            {errorMessage ? (
-              <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-500/40 text-rose-300 text-xs flex items-center gap-2 max-w-lg">
-                <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
-                <span>{errorMessage}</span>
+                <button
+                  onClick={() => startCamera()}
+                  className="w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 transition-all active:scale-[0.98]"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  <span>Coba Hubungkan Kamera Lagi</span>
+                </button>
               </div>
-            ) : null}
+            ) : (
+              <>
+                <div className="w-16 h-16 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-500 shadow-xl">
+                  <Camera className="w-8 h-8 text-cyan-400" />
+                </div>
 
-            <div className="flex items-center gap-2 pt-2">
-              <button
-                onClick={() => startCamera()}
-                className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs shadow-lg shadow-cyan-500/20 flex items-center gap-2 transition-all"
-              >
-                <Video className="w-4 h-4" />
-                <span>Nyalakan Kamera Sekarang</span>
-              </button>
-            </div>
+                <div className="max-w-md">
+                  <h4 className="text-base font-bold text-white tracking-tight">Kamera Laptop / USB Siap Digunakan</h4>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Kamera mendeteksi berbagai jenis item nyata secara instan di browser menggunakan TensorFlow AI Vision.
+                  </p>
+                </div>
+
+                {errorMessage ? (
+                  <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-500/40 text-rose-300 text-xs flex items-center gap-2 max-w-lg">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                    <span>{errorMessage}</span>
+                  </div>
+                ) : null}
+
+                <div className="flex items-center gap-2 pt-2">
+                  <button
+                    onClick={() => startCamera()}
+                    className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs shadow-lg shadow-cyan-500/20 flex items-center gap-2 transition-all active:scale-[0.98]"
+                  >
+                    <Video className="w-4 h-4" />
+                    <span>Nyalakan Kamera Sekarang</span>
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
 

@@ -39,6 +39,8 @@ export const INITIAL_PJU: SmartPJUData = {
   pinLdr: 36,
   pinLedMerah: 25,
   pinLedPutih: 26,
+  jamTerakhirBeralih: '06:00:00 WIB',
+  siklusWaktu: 'SIANG',
 };
 
 export const INITIAL_CROSSING: SmartCrossingData = {
@@ -71,6 +73,9 @@ export const INITIAL_GAS: GasAirQualityData = {
   pinGas: 39,
   thresholdBersih: 1000,
   thresholdSedang: 1500,
+  isAlarmActive: false,
+  isAlarmMuted: false,
+  lastAlarmTime: undefined,
 };
 
 export const INITIAL_DEVICES: IoTDevice[] = [

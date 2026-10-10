@@ -16,6 +16,16 @@ import {
 
 export const LightingView: React.FC = () => {
   const { pju, setLdrValue, togglePjuDayNight, isHardwareConnected } = useSmartCity();
+  const [currentClock, setCurrentClock] = React.useState<string>('');
+
+  React.useEffect(() => {
+    const tick = () => {
+      setCurrentClock(new Date().toLocaleTimeString('id-ID', { hour12: false }) + ' WIB');
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   const isGelap = pju.kondisi === 'GELAP';
 
@@ -35,7 +45,7 @@ export const LightingView: React.FC = () => {
           </span>
         </div>
       )}
-      {/* Status Banner */}
+      {/* Status Banner with Live City Clock */}
       <div
         className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-all ${
           isGelap
@@ -54,9 +64,9 @@ export const LightingView: React.FC = () => {
             {isGelap ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                FITUR 3: SMART PJU OTOMATIS BERDASARKAN CAHAYA
+                FITUR 3: SMART PJU OTOMATIS BERDASARKAN CAHAYA & WAKTU
               </span>
               <span
                 className={`px-2 py-0.5 rounded text-[10px] font-bold ${
@@ -67,21 +77,25 @@ export const LightingView: React.FC = () => {
               >
                 KONDISI: {pju.kondisi}
               </span>
+              {/* Live Digital Clock Badge */}
+              <span className="px-2.5 py-0.5 rounded bg-slate-950 font-mono text-cyan-300 border border-slate-800 text-[11px] font-bold">
+                Jam Kota: {currentClock || '18:00:00 WIB'}
+              </span>
             </div>
             <h2 className="text-sm font-bold text-white mt-0.5">
               Status PJU: <span className={isGelap ? 'text-amber-400' : 'text-slate-400'}>{pju.pjuStatus}</span> (Ambang LDR: {pju.thresholdLdr})
             </h2>
             <p className="text-xs text-slate-300">
               {isGelap
-                ? 'Cahaya redup terdeteksi. LED Merah (Pin 25) dan LED Putih (Pin 26) otomatis menyala.'
-                : 'Cahaya terang terdeteksi. LED Merah (Pin 25) dan LED Putih (Pin 26) padam untuk efisiensi energi.'}
+                ? `Kondisi redup/malam terdeteksi (Tercatat sejak ${pju.jamTerakhirBeralih || currentClock}). LED Merah (Pin 25) & Putih (Pin 26) otomatis aktif.`
+                : `Kondisi terang/siang terdeteksi (Tercatat sejak ${pju.jamTerakhirBeralih || currentClock}). Kedua lampu padam untuk efisiensi daya kota.`}
             </p>
           </div>
         </div>
 
         <button
           onClick={togglePjuDayNight}
-          className={`px-3.5 py-2 rounded-lg text-xs font-bold border transition-all flex items-center gap-2 ${
+          className={`px-3.5 py-2 rounded-lg text-xs font-bold border transition-all flex items-center gap-2 cursor-pointer ${
             isGelap
               ? 'bg-amber-500 text-black border-amber-400 hover:bg-amber-400'
               : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
@@ -105,12 +119,12 @@ export const LightingView: React.FC = () => {
         />
 
         <MetricCard
-          title="Status Lampu PJU"
+          title="Status Lampu PJU & Waktu"
           value={pju.pjuStatus}
-          statusText={isGelap ? 'Lampu Aktif' : 'Lampu Standby'}
+          statusText={isGelap ? 'Menyala (Malam)' : 'Padam (Siang)'}
           statusVariant={isGelap ? 'warning' : 'neutral'}
           icon={<Lightbulb className="w-4 h-4" />}
-          footerText="Otomatis berbasis LDR"
+          footerText={`Beralih: ${pju.jamTerakhirBeralih || currentClock || 'Baru saja'}`}
         />
 
         <MetricCard

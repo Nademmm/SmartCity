@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "UrbanPulse : Autonomous Smart City Virtual Command Center",
+  title: "Smart City : Autonomous IoT Command Center",
   description: "Virtual Command Center untuk memantau kondisi kota real-time, mengontrol perangkat IoT ESP32, dan menjalankan otomasi Smart City.",
 };
 
