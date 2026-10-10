@@ -1,7 +1,6 @@
 'use client';
 
 import React, { ReactNode } from 'react';
-import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
 
 interface MetricCardProps {
   title: string;
@@ -25,70 +24,55 @@ export const MetricCard: React.FC<MetricCardProps> = ({
   value,
   unit,
   statusText,
-  statusVariant = 'info',
-  trend,
+  statusVariant = 'neutral',
   icon,
   footerText,
   onClick,
   className = '',
 }) => {
-  const getStatusBadge = () => {
+  const getStatusStyle = () => {
     switch (statusVariant) {
       case 'success':
-        return 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30';
+        return 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
       case 'warning':
-        return 'bg-amber-500/15 text-amber-400 border border-amber-500/30';
+        return 'text-amber-400 bg-amber-500/10 border-amber-500/20';
       case 'danger':
-        return 'bg-rose-500/15 text-rose-400 border border-rose-500/30';
-      case 'neutral':
-        return 'bg-slate-700/30 text-slate-300 border border-slate-600/40';
+        return 'text-rose-400 bg-rose-500/10 border-rose-500/20';
       case 'info':
+        return 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20';
+      case 'neutral':
       default:
-        return 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30';
+        return 'text-slate-400 bg-slate-800/40 border-slate-700/50';
     }
   };
 
   return (
     <div
       onClick={onClick}
-      className={`glass-panel rounded-xl p-4 transition-all duration-200 hover:border-cyan-500/40 hover:bg-[#14203b] ${
-        onClick ? 'cursor-pointer' : ''
+      className={`rounded-xl bg-slate-900/60 border border-slate-800/80 p-4 transition-colors hover:border-slate-700 ${
+        onClick ? 'cursor-pointer hover:bg-slate-900/90' : ''
       } ${className}`}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2.5">
-          <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-            {icon}
-          </div>
-          <div>
-            <h3 className="text-xs font-medium uppercase tracking-wider text-slate-400">{title}</h3>
-            {statusText && (
-              <span className={`inline-block mt-1 px-2 py-0.5 rounded text-[10px] font-semibold tracking-wide ${getStatusBadge()}`}>
-                {statusText}
-              </span>
-            )}
-          </div>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="flex items-center gap-2 text-slate-400">
+          <div className="text-slate-400">{icon}</div>
+          <h3 className="text-xs font-medium text-slate-400 truncate">{title}</h3>
         </div>
-
-        {trend && (
-          <div className="flex items-center gap-1 text-[11px] font-medium text-slate-300">
-            {trend.direction === 'up' && <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />}
-            {trend.direction === 'down' && <TrendingDown className="w-3.5 h-3.5 text-rose-400" />}
-            {trend.direction === 'neutral' && <Minus className="w-3.5 h-3.5 text-slate-400" />}
-            <span>{trend.value}</span>
+        {statusText && (
+          <div className={`px-2 py-0.5 rounded text-[11px] font-medium border shrink-0 ${getStatusStyle()}`}>
+            {statusText}
           </div>
         )}
       </div>
 
-      <div className="mt-3 flex items-baseline gap-1.5">
-        <span className="text-2xl font-bold tracking-tight text-white">{value}</span>
-        {unit && <span className="text-xs font-semibold text-cyan-400/80">{unit}</span>}
+      <div className="flex items-baseline gap-1.5 my-1">
+        <p className="text-2xl font-bold tracking-tight text-white">{value}</p>
+        {unit && <p className="text-xs font-medium text-slate-400">{unit}</p>}
       </div>
 
       {footerText && (
-        <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
-          <span>{footerText}</span>
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+        <div className="mt-3 pt-2.5 border-t border-slate-800/60 text-[11px] text-slate-400">
+          {footerText}
         </div>
       )}
     </div>

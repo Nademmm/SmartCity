@@ -9,8 +9,7 @@ import {
   Radio,
   Search,
   CheckCircle2,
-  Server,
-  Zap,
+  Video,
 } from 'lucide-react';
 
 export const IoTDevicesView: React.FC = () => {
@@ -26,113 +25,109 @@ export const IoTDevicesView: React.FC = () => {
   });
 
   return (
-    <div className="space-y-5">
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div className="space-y-4">
+      {/* 4 Telemetry Summary Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <MetricCard
-          title="Total Modul Terdaftar"
+          title="Modul Miniatur Terdaftar"
           value={devices.length}
-          unit="Node / Sensor"
-          statusText="Konfigurasi Nyata"
+          unit="Node"
+          statusText="Konfigurasi Aktif"
           statusVariant="info"
           icon={<Cpu className="w-4 h-4" />}
-          footerText="1 Miniatur + 1 AI Cam + 3 Sensor"
+          footerText="ESP32 Miniatur dan Sensor Fisik"
         />
 
         <MetricCard
-          title="Status Miniatur"
-          value={isHardwareConnected ? 'ONLINE' : 'OFFLINE'}
-          statusText={isHardwareConnected ? 'ESP32 Terhubung' : 'Belum Terhubung ke PC'}
-          statusVariant={isHardwareConnected ? 'success' : 'danger'}
+          title="Status Board ESP32"
+          value={isHardwareConnected ? 'TERHUBUNG' : 'STANDBY'}
+          statusText={isHardwareConnected ? 'Online' : 'Offline'}
+          statusVariant={isHardwareConnected ? 'success' : 'neutral'}
           icon={<CheckCircle2 className="w-4 h-4" />}
-          footerText="ESP32 MicroPython Thonny"
+          footerText="Firmware MicroPython Thonny"
         />
 
         <MetricCard
-          title="Kamera AI YOLO11"
+          title="Kamera AI Komputer"
           value={isCameraConnected ? 'AKTIF' : 'STANDBY'}
-          statusText={isCameraConnected ? 'Live Stream Port 8088' : 'Menunggu Feed Python'}
+          statusText={isCameraConnected ? 'Terhubung' : 'Siap'}
           statusVariant={isCameraConnected ? 'success' : 'neutral'}
-          icon={<Server className="w-4 h-4" />}
-          footerText="Computer Vision OpenCV"
+          icon={<Video className="w-4 h-4" />}
+          footerText="Webcam Laptop Langsung"
         />
 
         <MetricCard
           title="Sinkronisasi Telemetri"
           value={lastTelemetryTimestamp || 'Menunggu'}
-          statusText="Endpoint /api/iot/telemetry"
+          statusText="Polling Aktif"
           statusVariant={isHardwareConnected ? 'success' : 'neutral'}
           icon={<Radio className="w-4 h-4" />}
-          footerText="Metode HTTP POST JSON"
+          footerText="Format Payload JSON"
         />
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="glass-panel rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div className="flex items-center gap-2 bg-slate-900/90 border border-slate-800 rounded-xl px-3 py-2 flex-1 max-w-md">
-          <Search className="w-4 h-4 text-slate-400" />
+      <div className="rounded-xl bg-slate-900/60 border border-slate-800/80 p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+        <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 flex-1 max-w-md">
+          <Search className="w-4 h-4 text-slate-500" />
           <input
             type="text"
-            placeholder="Cari Device ID, nama sensor, atau nomor pin..."
+            placeholder="Cari ID perangkat, nama sensor, atau nomor pin..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="bg-transparent text-xs text-white placeholder-slate-500 focus:outline-none w-full"
           />
         </div>
 
-        <div className="text-xs text-slate-400 font-mono">
-          Menampilkan {filteredDevices.length} dari {devices.length} Perangkat Terdaftar
-        </div>
+        <p className="text-slate-400 font-mono text-[11px]">
+          {filteredDevices.length} dari {devices.length} Perangkat Terdaftar
+        </p>
       </div>
 
-      {/* Main Grid: Hardware Devices Table & Terminal Output */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Left: Hardware Devices Table */}
-        <div className="lg:col-span-7 glass-panel rounded-2xl overflow-hidden border border-slate-800 flex flex-col justify-between">
+      {/* Main Grid: Devices Table & Terminal Output */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        {/* Hardware Devices Table */}
+        <div className="lg:col-span-7 rounded-xl bg-slate-900/60 border border-slate-800/80 overflow-hidden flex flex-col justify-between">
           <div>
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+            <div className="p-3.5 border-b border-slate-800/80 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Cpu className="w-4 h-4 text-cyan-400" />
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                  Daftar Perangkat Fisik & Pemetaan Pin ESP32
+                <Cpu className="w-4 h-4 text-slate-400" />
+                <h3 className="text-xs font-semibold text-white uppercase tracking-wider">
+                  Daftar Perangkat Fisik dan Pinout ESP32
                 </h3>
               </div>
-              <span className="text-xs font-mono text-cyan-400">Firmware: MicroPython</span>
+              <p className="text-[11px] font-mono text-slate-400">MicroPython</p>
             </div>
 
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
-                  <tr className="border-b border-slate-800 bg-slate-900/60 text-slate-400 font-mono text-[11px] uppercase">
-                    <th className="py-3 px-4">Device ID</th>
-                    <th className="py-3 px-4">Nama Perangkat</th>
-                    <th className="py-3 px-4">Pemetaan Pin</th>
-                    <th className="py-3 px-4">Koneksi</th>
-                    <th className="py-3 px-4">Status</th>
+                  <tr className="border-b border-slate-800 bg-slate-950/60 text-slate-400 font-mono text-[11px]">
+                    <th className="py-2.5 px-3.5">Device ID</th>
+                    <th className="py-2.5 px-3.5">Perangkat</th>
+                    <th className="py-2.5 px-3.5">Pemetaan Pin</th>
+                    <th className="py-2.5 px-3.5">Status</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800/60">
+                <tbody className="divide-y divide-slate-800/50">
                   {filteredDevices.map((dev) => (
-                    <tr key={dev.id} className="hover:bg-slate-800/40 transition-colors">
-                      <td className="py-3 px-4 font-mono font-bold text-cyan-400">{dev.id}</td>
-                      <td className="py-3 px-4">
-                        <div className="font-semibold text-white">{dev.name}</div>
-                        <div className="text-[10px] text-slate-400">{dev.description}</div>
+                    <tr key={dev.id} className="hover:bg-slate-900/50 transition-colors">
+                      <td className="py-2.5 px-3.5 font-mono text-cyan-400 font-medium">{dev.id}</td>
+                      <td className="py-2.5 px-3.5">
+                        <p className="font-medium text-white">{dev.name}</p>
+                        <p className="text-[10px] text-slate-400 line-clamp-1">{dev.description}</p>
                       </td>
-                      <td className="py-3 px-4 font-mono text-amber-300 bg-slate-900/50 rounded">{dev.pinout}</td>
-                      <td className="py-3 px-4 font-mono text-slate-400">{dev.connectionType}</td>
-                      <td className="py-3 px-4">
-                        {dev.status === 'Online' ? (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                            Online
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                            Offline (Terputus)
-                          </span>
-                        )}
+                      <td className="py-2.5 px-3.5 font-mono text-slate-300 text-[11px]">{dev.pinout}</td>
+                      <td className="py-2.5 px-3.5">
+                        <div
+                          className={`inline-flex px-2 py-0.5 rounded text-[10px] font-medium border ${
+                            dev.status === 'Online'
+                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25'
+                              : 'bg-slate-800/40 text-slate-400 border-slate-700/50'
+                          }`}
+                        >
+                          {dev.status}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -141,17 +136,17 @@ export const IoTDevicesView: React.FC = () => {
             </div>
           </div>
 
-          <div className="p-4 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
-            <span>Total GPIO Terpakai: 10 Pin</span>
-            <span className="font-mono text-cyan-400">Baud Rate: 115200</span>
+          <div className="p-3.5 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
+            <p>Total GPIO Digunakan: 10 Pin</p>
+            <p className="font-mono text-slate-400">Baud Rate: 115200</p>
           </div>
         </div>
 
-        {/* Right: Full Terminal Output Stream */}
+        {/* Live Terminal Output Stream */}
         <div className="lg:col-span-5">
           <TerminalConsole
             filterFeature="all"
-            title="Live Thonny Serial Diagnostic"
+            title="Thonny Serial Diagnostic"
             maxHeight="max-h-[460px]"
           />
         </div>

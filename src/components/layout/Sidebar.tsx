@@ -13,8 +13,6 @@ import {
   Zap,
   Bell,
   Activity,
-  Radio,
-  User,
   X,
 } from 'lucide-react';
 
@@ -24,16 +22,16 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
-  const { activeSubsystem, setActiveSubsystem, alerts, isLiveIoTMode, isHardwareConnected } = useSmartCity();
+  const { activeSubsystem, setActiveSubsystem, alerts, isHardwareConnected } = useSmartCity();
 
   const unreadAlertsCount = alerts.filter((a) => !a.isRead && !a.isResolved).length;
 
   const menuItems: { id: SubsystemType; label: string; icon: React.ReactNode; badge?: number }[] = [
-    { id: 'overview', label: 'Ringkasan Miniatur', icon: <LayoutDashboard className="w-4 h-4" /> },
-    { id: 'traffic', label: 'Traffic AI Camera', icon: <Navigation className="w-4 h-4" /> },
-    { id: 'lighting', label: 'Smart PJU (LDR)', icon: <Lightbulb className="w-4 h-4" /> },
-    { id: 'pedestrian', label: 'Smart Penyeberangan', icon: <Footprints className="w-4 h-4" /> },
-    { id: 'air-quality', label: 'Monitoring Polusi', icon: <Wind className="w-4 h-4" /> },
+    { id: 'overview', label: 'Ringkasan Sistem', icon: <LayoutDashboard className="w-4 h-4" /> },
+    { id: 'traffic', label: 'Lalu Lintas (Kamera AI)', icon: <Navigation className="w-4 h-4" /> },
+    { id: 'lighting', label: 'Pencahayaan Jalan (LDR)', icon: <Lightbulb className="w-4 h-4" /> },
+    { id: 'pedestrian', label: 'Penyeberangan Jalan', icon: <Footprints className="w-4 h-4" /> },
+    { id: 'air-quality', label: 'Kualitas Udara (Gas MQ)', icon: <Wind className="w-4 h-4" /> },
     { id: 'iot-devices', label: 'Hardware & Pinout', icon: <Cpu className="w-4 h-4" /> },
     { id: 'automation', label: 'Logika Otomasi', icon: <Zap className="w-4 h-4" /> },
     { id: 'alerts', label: 'Notifikasi & Log', icon: <Bell className="w-4 h-4" />, badge: unreadAlertsCount },
@@ -50,67 +48,63 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
       {isOpen && (
         <div
           onClick={onClose}
-          className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm lg:hidden transition-opacity"
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden transition-opacity"
         />
       )}
 
       {/* Sidebar Container */}
       <aside
-        className={`fixed lg:static top-0 bottom-0 left-0 z-50 w-64 bg-[#080E1B] border-r border-slate-800/80 flex flex-col justify-between transition-transform duration-300 ease-in-out ${
+        className={`fixed lg:static top-0 bottom-0 left-0 z-50 w-64 bg-[#0B0F19] border-r border-slate-800/80 flex flex-col justify-between transition-transform duration-200 ease-in-out ${
           isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
-        {/* Brand Header */}
         <div>
-          <div className="p-5 border-b border-slate-800/80 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="relative flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-600 to-blue-500 shadow-lg shadow-cyan-500/20">
-                <Activity className="w-5 h-5 text-white" />
-                <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full border-2 border-[#080E1B] animate-ping" />
-                <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full border-2 border-[#080E1B]" />
+          {/* Header */}
+          <div className="h-16 px-5 border-b border-slate-800/80 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700/80 flex items-center justify-center text-cyan-400">
+                <Activity className="w-4 h-4" />
               </div>
               <div>
-                <h1 className="text-base font-extrabold tracking-tight text-white flex items-center gap-1.5">
-                  Smart<span className="text-cyan-400">City</span>
-                </h1>
-                <p className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Miniatur IoT Dashboard</p>
+                <h1 className="text-sm font-semibold tracking-tight text-white">Smart City</h1>
+                <p className="text-[11px] text-slate-400 font-mono">Control Center</p>
               </div>
             </div>
 
             <button
               onClick={onClose}
-              className="lg:hidden p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+              className="lg:hidden p-1.5 rounded-md text-slate-400 hover:text-white hover:bg-slate-800"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
 
           {/* Navigation Menu */}
           <nav className="p-3 space-y-1">
-            <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              Modul Miniatur IoT
-            </div>
+            <p className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+              Modul IoT Miniatur
+            </p>
             {menuItems.map((item) => {
               const isActive = activeSubsystem === item.id;
               return (
                 <button
                   key={item.id}
                   onClick={() => handleNavClick(item.id)}
-                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all duration-150 ${
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
                     isActive
-                      ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-md shadow-cyan-500/5'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 border border-transparent'
+                      ? 'bg-slate-800/90 text-white border border-slate-700/80'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent'
                   }`}
                 >
-                  <div className="flex items-center gap-3">
-                    <span className={isActive ? 'text-cyan-400' : 'text-slate-400'}>{item.icon}</span>
-                    <span>{item.label}</span>
+                  <div className="flex items-center gap-2.5">
+                    <div className={isActive ? 'text-cyan-400' : 'text-slate-400'}>{item.icon}</div>
+                    <p>{item.label}</p>
                   </div>
 
                   {item.badge !== undefined && item.badge > 0 && (
-                    <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-500 text-white animate-pulse">
+                    <div className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30">
                       {item.badge}
-                    </span>
+                    </div>
                   )}
                 </button>
               );
@@ -118,43 +112,27 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
           </nav>
         </div>
 
-        {/* Bottom System Telemetry Pod */}
-        <div className="p-4 border-t border-slate-800/80 bg-[#060B16]">
-          <div className="space-y-2 mb-3">
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="text-slate-400 flex items-center gap-1.5">
-                <span className={`w-2 h-2 rounded-full ${isHardwareConnected ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`} />
-                ESP32 Hardware:
-              </span>
-              <span className={`font-semibold ${isHardwareConnected ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {isHardwareConnected ? 'Online (Terhubung)' : 'Offline (Terputus)'}
-              </span>
+        {/* System Telemetry Status */}
+        <div className="p-4 border-t border-slate-800/80 bg-[#090D16]">
+          <div className="space-y-2 text-xs">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-slate-400">
+                <div className={`w-2 h-2 rounded-full ${isHardwareConnected ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+                <p>ESP32 Board</p>
+              </div>
+              <p className={`font-medium ${isHardwareConnected ? 'text-emerald-400' : 'text-slate-400'}`}>
+                {isHardwareConnected ? 'Terhubung' : 'Standby'}
+              </p>
             </div>
 
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="text-slate-400 flex items-center gap-1.5">
-                <Radio className="w-3 h-3 text-cyan-400" />
-                Live Ingestion:
-              </span>
-              <span className="font-semibold text-cyan-400 font-mono">
-                {isLiveIoTMode ? 'Aktif (Auto)' : 'Manual'}
-              </span>
+            <div className="flex items-center justify-between">
+              <p className="text-slate-400">Firmware</p>
+              <p className="font-mono text-slate-300 text-[11px]">MicroPython</p>
             </div>
 
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="text-slate-400">Firmware:</span>
-              <span className="font-mono text-slate-300">ESP32 MicroPython</span>
-            </div>
-          </div>
-
-          {/* User Profile */}
-          <div className="pt-3 border-t border-slate-800 flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-full bg-slate-800 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
-              <User className="w-4 h-4" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs font-semibold text-white truncate">IoT Miniatur Operator</div>
-              <div className="text-[10px] text-slate-400 truncate">Thonny & Python Vision</div>
+            <div className="flex items-center justify-between">
+              <p className="text-slate-400">Protokol</p>
+              <p className="font-mono text-slate-300 text-[11px]">Serial / HTTP</p>
             </div>
           </div>
         </div>

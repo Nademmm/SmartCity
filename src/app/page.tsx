@@ -45,7 +45,7 @@ const DashboardContent: React.FC = () => {
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[#070B14]">
+    <div className="flex h-screen w-screen overflow-hidden bg-[#0B0F19]">
       {/* Pollution Emergency Alarm Modal & Strobe */}
       <PollutionAlarmModal />
 

@@ -470,31 +470,30 @@ export const LiveWebcamFeed: React.FC = () => {
   }, [isStreaming, filterMode, minConfidence, updateTrafficCameraData]);
 
   return (
-    <div className="rounded-2xl bg-[#060B16] border border-cyan-500/40 overflow-hidden shadow-2xl flex flex-col">
+    <div className="rounded-xl bg-slate-900/60 border border-slate-800/80 overflow-hidden flex flex-col">
       {/* Header Bar */}
-      <div className="px-4 py-3 bg-[#080E1D] border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
+      <div className="px-4 py-3 bg-slate-950/80 border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
-          <div className="p-2 rounded-xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
+          <div className="p-2 rounded-lg bg-slate-800 text-slate-300 border border-slate-700/80">
             <Camera className="w-4 h-4" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-sm font-bold text-white tracking-tight">
-                Live AI Camera Traffic Monitor (Webcam Laptop)
+              <h3 className="text-xs font-semibold text-white uppercase tracking-wider">
+                Feed Kamera Pemantau (AI Computer Vision)
               </h3>
-              {isStreaming ? (
-                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  LIVE AKTIF ({activeFps} FPS)
-                </span>
-              ) : (
-                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                  OFFLINE (MATI)
-                </span>
-              )}
+              <div
+                className={`px-2 py-0.5 rounded text-[10px] font-mono font-medium border ${
+                  isStreaming
+                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25'
+                    : 'bg-slate-800/40 text-slate-400 border-slate-700/50'
+                }`}
+              >
+                {isStreaming ? `Live (${activeFps} FPS)` : 'Standby'}
+              </div>
             </div>
-            <p className="text-[11px] text-slate-400">
-              {activeCameraLabel ? `Kamera Terhubung: ${activeCameraLabel}` : 'Webcam terhubung langsung ke dashboard.'}
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              {activeCameraLabel ? `Kamera: ${activeCameraLabel}` : 'Webcam laptop/USB terhubung langsung ke dashboard.'}
             </p>
           </div>
         </div>
@@ -502,15 +501,15 @@ export const LiveWebcamFeed: React.FC = () => {
         {/* Action Controls */}
         <div className="flex items-center gap-2 flex-wrap">
           {/* Filter Mode Selector */}
-          <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700/80 rounded-lg px-2 py-1">
-            <Layers className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+          <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-lg px-2 py-1">
+            <Layers className="w-3.5 h-3.5 text-slate-400 shrink-0" />
             <select
               value={filterMode}
               onChange={(e) => setFilterMode(e.target.value as any)}
-              className="bg-transparent text-slate-200 text-xs font-semibold focus:outline-none cursor-pointer"
+              className="bg-transparent text-slate-200 text-xs font-medium focus:outline-none cursor-pointer"
               title="Pilih jenis objek yang dideteksi oleh AI"
             >
-              <option value="all" className="bg-slate-900 text-slate-200">Semua Item (80+ Objek)</option>
+              <option value="all" className="bg-slate-900 text-slate-200">Semua Objek (80+ Jenis)</option>
               <option value="traffic_pedestrian" className="bg-slate-900 text-slate-200">Kendaraan & Pejalan Kaki</option>
               <option value="vehicles" className="bg-slate-900 text-slate-200">Khusus Kendaraan</option>
             </select>
@@ -519,11 +518,11 @@ export const LiveWebcamFeed: React.FC = () => {
           {/* Quick Switch Camera Button */}
           <button
             onClick={switchCamera}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/30 text-xs font-semibold transition-colors"
-            title="Beralih antara Kamera Internal Laptop dan Webcam USB"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium transition-colors cursor-pointer"
+            title="Beralih kamera"
           >
             <SwitchCamera className="w-3.5 h-3.5" />
-            <span>Ganti Kamera {devices.length > 1 ? `(${devices.length})` : ''}</span>
+            <p>Ganti Kamera {devices.length > 1 ? `(${devices.length})` : ''}</p>
           </button>
 
           {/* Device Selection Dropdown if multiple */}
@@ -535,7 +534,7 @@ export const LiveWebcamFeed: React.FC = () => {
                 setSelectedDeviceId(newId);
                 startCamera(newId);
               }}
-              className="bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 font-mono focus:outline-none focus:border-cyan-400 max-w-[160px] truncate"
+              className="bg-slate-900 border border-slate-800 text-slate-300 text-xs rounded-lg px-2.5 py-1 font-mono focus:outline-none max-w-[150px] truncate"
             >
               {devices.map((d, i) => (
                 <option key={d.deviceId || i} value={d.deviceId}>
@@ -548,59 +547,51 @@ export const LiveWebcamFeed: React.FC = () => {
           {/* Toggle AI Overlay Button */}
           <button
             onClick={() => setShowAiOverlay(!showAiOverlay)}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
               showAiOverlay
-                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
+                ? 'bg-slate-800 text-white border-slate-700'
                 : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
             }`}
             title="Tampilkan atau sembunyikan kotak deteksi AI"
           >
             <Scan className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">HUD AI Vision</span>
+            <span className="hidden sm:inline">Overlay Box</span>
           </button>
 
           {/* Start/Stop Camera Button */}
           {isStreaming ? (
             <button
               onClick={stopCamera}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 border border-rose-500/40 text-xs font-bold transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 border border-rose-500/30 text-xs font-medium transition-colors cursor-pointer"
             >
               <VideoOff className="w-3.5 h-3.5" />
-              <span>Matikan</span>
+              <p>Matikan</p>
             </button>
           ) : (
             <button
               onClick={() => startCamera()}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 hover:bg-emerald-400 font-bold text-xs shadow-lg shadow-emerald-500/20 transition-all"
+              className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40 text-xs font-semibold transition-colors cursor-pointer"
             >
               <Video className="w-3.5 h-3.5" />
-              <span>Nyalakan Kamera</span>
+              <p>Nyalakan Kamera</p>
             </button>
           )}
         </div>
       </div>
 
       {/* Model Status & Sensitivity Adjustment Bar */}
-      <div className="px-4 py-2 bg-slate-950/90 border-b border-slate-800 flex flex-wrap items-center justify-between text-xs text-slate-300 gap-2">
+      <div className="px-4 py-2 bg-slate-950/60 border-b border-slate-800/80 flex flex-wrap items-center justify-between text-xs text-slate-400 gap-2">
         <div className="flex items-center gap-2">
-          {isModelLoading ? (
-            <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
-          ) : (
-            <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-          )}
-          <span className="font-mono text-[11px] text-cyan-300 font-semibold">
-            Status AI: {modelStatusText}
-          </span>
-          <span className="text-slate-600">|</span>
-          <span className="text-[11px] text-slate-400">
-            Arahkan kamera ke berbagai item di meja atau maket (mobil, orang, smartphone, botol, cangkir, dll).
-          </span>
+          <Sparkles className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+          <p className="font-mono text-[11px] text-slate-300">
+            Model: {modelStatusText}
+          </p>
         </div>
 
         {/* Sensitivity / Min Confidence Slider */}
         <div className="flex items-center gap-2 font-mono text-[11px]">
           <SlidersHorizontal className="w-3 h-3 text-slate-400" />
-          <span className="text-slate-400">Sensitivitas:</span>
+          <p className="text-slate-400">Sensitivitas:</p>
           <input
             type="range"
             min="0.20"
@@ -611,7 +602,7 @@ export const LiveWebcamFeed: React.FC = () => {
             className="w-20 accent-cyan-400 cursor-pointer"
             title={`Threshold Keyakinan: ${Math.round(minConfidence * 100)}%`}
           />
-          <span className="text-cyan-300 font-bold">{Math.round(minConfidence * 100)}%</span>
+          <p className="text-white font-medium">{Math.round(minConfidence * 100)}%</p>
         </div>
       </div>
 
@@ -737,35 +728,26 @@ export const LiveWebcamFeed: React.FC = () => {
 
             {/* Top HUD Badges */}
             <div className="absolute top-3 left-3 flex items-center gap-2">
-              <span className="bg-slate-950/85 backdrop-blur-md px-2.5 py-1 rounded text-[10px] font-mono text-cyan-300 border border-slate-800 shadow-lg flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
-                <span>AI VISION: TENSORFLOW COCO-SSD (80+ KELAS)</span>
-              </span>
-              <span className="bg-slate-950/85 backdrop-blur-md px-2 py-1 rounded text-[10px] font-mono text-emerald-400 border border-slate-800">
-                ACTIVE @ {activeFps} FPS
-              </span>
+              <div className="bg-slate-950/90 px-2.5 py-1 rounded text-[10px] font-mono text-slate-300 border border-slate-800">
+                COCO-SSD AI
+              </div>
+              <div className="bg-slate-950/90 px-2 py-1 rounded text-[10px] font-mono text-emerald-400 border border-slate-800">
+                {activeFps} FPS
+              </div>
             </div>
 
             {/* Bottom HUD Bar */}
             <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between pointer-events-none">
-              <div className="bg-slate-950/85 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-800 text-[11px] font-mono text-slate-200 flex items-center gap-3 shadow-xl">
-                <span className="flex items-center gap-1.5 text-emerald-400 font-bold">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                  TERDETEKSI: {detectedItems.length} ITEM
-                </span>
-                <span className="text-slate-500">|</span>
-                <span className="text-cyan-300">
-                  KEPADATAN: <strong>{traffic.density}%</strong> ({traffic.statusText})
-                </span>
-                <span className="text-slate-500">|</span>
-                <span className="text-amber-300 font-bold">
-                  KENDARAAN: {traffic.vehicleCount}
-                </span>
+              <div className="bg-slate-950/90 px-3 py-1.5 rounded-lg border border-slate-800 text-[11px] font-mono text-slate-300 flex items-center gap-3">
+                <p className="text-emerald-400 font-medium">Terdeteksi: {detectedItems.length} Objek</p>
+                <p className="text-slate-600">|</p>
+                <p>Kepadatan: {traffic.density}% ({traffic.statusText})</p>
+                <p className="text-slate-600">|</p>
+                <p className="text-amber-300">Kendaraan: {traffic.vehicleCount}</p>
               </div>
 
-              <div className="bg-rose-500/90 text-white px-2.5 py-1 rounded-lg text-[10px] font-bold tracking-wider uppercase font-mono shadow-xl flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                <span>LIVE DETEKTOR</span>
+              <div className="bg-slate-950/90 text-white px-2.5 py-1 rounded text-[10px] font-medium font-mono border border-slate-800">
+                Live Video
               </div>
             </div>
           </div>
@@ -774,29 +756,28 @@ export const LiveWebcamFeed: React.FC = () => {
 
       {/* Live Detected Items Chips Strip */}
       {isStreaming && (
-        <div className="px-4 py-2.5 bg-[#070D1A] border-t border-slate-800 flex items-center gap-2 overflow-x-auto text-xs">
-          <span className="font-mono text-[11px] text-slate-400 uppercase font-bold shrink-0">
-            Item Terlihat Saat Ini:
-          </span>
+        <div className="px-4 py-2 bg-slate-950 border-t border-slate-800/80 flex items-center gap-2 overflow-x-auto text-xs">
+          <p className="font-mono text-[11px] text-slate-400 font-medium shrink-0">
+            Objek Terdeteksi:
+          </p>
           {detectedItems.length === 0 ? (
-            <span className="text-slate-500 text-[11px] italic">
-              Belum ada item terdeteksi. Dekatkan objek (mobil mainan, orang, smartphone, botol, dll) ke arah kamera.
-            </span>
+            <p className="text-slate-500 text-[11px] italic">
+              Belum ada objek di depan kamera. Dekatkan benda atau maket ke lensa kamera.
+            </p>
           ) : (
             <div className="flex items-center gap-1.5 flex-wrap">
               {detectedItems.map((item, idx) => (
-                <span
+                <div
                   key={`${item.id}-${idx}`}
-                  className="px-2.5 py-0.5 rounded-full font-mono text-[11px] font-bold border flex items-center gap-1.5 transition-all"
+                  className="px-2 py-0.5 rounded font-mono text-[11px] border"
                   style={{
                     backgroundColor: `${item.color}15`,
-                    borderColor: `${item.color}50`,
+                    borderColor: `${item.color}40`,
                     color: item.color,
                   }}
                 >
-                  <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: item.color }} />
                   {item.label} ({(item.confidence * 100).toFixed(0)}%)
-                </span>
+                </div>
               ))}
             </div>
           )}
@@ -804,14 +785,14 @@ export const LiveWebcamFeed: React.FC = () => {
       )}
 
       {/* Footer Info Strip */}
-      <div className="px-4 py-2 bg-[#080E1D] border-t border-slate-800/80 text-xs text-slate-400 flex flex-wrap items-center justify-between gap-2">
+      <div className="px-4 py-2 bg-slate-950/80 border-t border-slate-800/80 text-xs text-slate-400 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-          <span>Deteksi berjalan langsung di GPU/CPU browser (Client-Side). Model dapat mengidentifikasi 80+ jenis item secara mandiri.</span>
+          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+          <p className="text-[11px]">Deteksi berjalan langsung di browser (Client-Side AI).</p>
         </div>
-        <div className="font-mono text-[11px] text-cyan-400">
-          Source: {activeCameraLabel || selectedDeviceId || 'Webcam Aktif'}
-        </div>
+        <p className="font-mono text-[11px] text-slate-400">
+          Source: {activeCameraLabel || selectedDeviceId || 'Webcam'}
+        </p>
       </div>
     </div>
   );

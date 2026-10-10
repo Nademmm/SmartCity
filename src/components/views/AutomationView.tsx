@@ -5,9 +5,7 @@ import { useSmartCity } from '@/context/SmartCityContext';
 import { MetricCard } from '@/components/common/MetricCard';
 import {
   Zap,
-  CheckCircle2,
   Play,
-  Clock,
   ShieldCheck,
   Power,
 } from 'lucide-react';
@@ -44,74 +42,72 @@ export const AutomationView: React.FC = () => {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <MetricCard
           title="Aturan Otomasi Aktif"
           value={`${activeRulesCount}/${rules.length}`}
-          unit="Rules"
-          statusText="100% Berjalan di Hardware"
+          unit="Rule"
+          statusText="Logika Terpasang"
           statusVariant="success"
           icon={<Zap className="w-4 h-4" />}
-          footerText="Logika Terintegrasi Thonny & AI"
+          footerText="Diimplementasikan di MicroPython"
         />
 
         <MetricCard
-          title="Total Aksi Terpicu"
+          title="Total Pemicu Eksekusi"
           value={totalExecutions}
-          unit="Eksekusi"
-          statusText="Responsif"
+          unit="Kali"
+          statusText="Riwayat Aktif"
           statusVariant="info"
           icon={<ShieldCheck className="w-4 h-4" />}
-          footerText="Riwayat Pemicu Otomasi"
+          footerText="Akumulasi Selama Sesi"
         />
 
         <MetricCard
-          title="Latensi Eksekusi Miniatur"
-          value="< 10"
-          unit="ms"
-          statusText="Real-Time GPIO"
+          title="Sistem PJU Otomatis"
+          value="AKTIF"
+          statusText="Ambang: 2000 ADC"
           statusVariant="success"
-          icon={<Clock className="w-4 h-4" />}
-          footerText="Langsung di ESP32 Chip"
+          icon={<Zap className="w-4 h-4" />}
+          footerText="Sensor LDR Pin 36"
         />
 
         <MetricCard
-          title="Sistem Keamanan Zebra Cross"
-          value="SIAP"
-          statusText="Batas 17/25 cm"
+          title="Sistem Zebra Cross"
+          value="AKTIF"
+          statusText="Dual Sensor Siap"
           statusVariant="success"
-          icon={<CheckCircle2 className="w-4 h-4" />}
-          footerText="Perlindungan Pejalan Kaki"
+          icon={<ShieldCheck className="w-4 h-4" />}
+          footerText="Pin 32/34 dan Pin 33/35"
         />
       </div>
 
       {/* Main Rules Container */}
-      <div className="glass-panel rounded-2xl p-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-slate-800">
+      <div className="rounded-xl bg-slate-900/60 border border-slate-800/80 p-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800/80">
           <div>
-            <h2 className="text-base font-bold text-white uppercase tracking-wider flex items-center gap-2">
-              <Zap className="w-4 h-4 text-cyan-400" />
-              Matriks Logika Otomasi Miniatur Smart City
+            <h2 className="text-xs font-semibold text-white uppercase tracking-wider">
+              Logika Otomasi Miniatur Smart City
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Daftar aturan otomasi yang diimplementasikan pada miniatur hardware ESP32 dan kamera lalu lintas AI.
+              Aturan otomasi yang dieksekusi mikrokontroler ESP32 berdasarkan pembacaan sensor fisik.
             </p>
           </div>
-          <span className="text-xs font-mono text-cyan-400 bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800">
-            Engine: MicroPython & Python Vision
-          </span>
+          <p className="text-[11px] font-mono text-slate-400 bg-slate-900 px-2.5 py-1 rounded border border-slate-800">
+            MicroPython & AI Vision
+          </p>
         </div>
 
         {/* Rule Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
           {rules.map((rule) => (
             <div
               key={rule.id}
-              className={`p-5 rounded-2xl border transition-all ${
+              className={`p-4 rounded-xl border transition-colors ${
                 rule.isEnabled
-                  ? 'bg-slate-900/80 border-slate-800 hover:border-cyan-500/40 shadow-lg'
+                  ? 'bg-slate-900/80 border-slate-800'
                   : 'bg-slate-950/60 border-slate-900 opacity-60'
               }`}
             >
@@ -119,70 +115,54 @@ export const AutomationView: React.FC = () => {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                    <p className="text-[10px] font-mono font-medium text-cyan-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
                       {rule.id}
-                    </span>
-                    <span
-                      className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                        rule.isEnabled
-                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                          : 'bg-slate-800 text-slate-400'
-                      }`}
-                    >
-                      {rule.isEnabled ? 'STATUS: AKTIF' : 'STATUS: NONAKTIF'}
-                    </span>
+                    </p>
+                    <p className="text-[10px] font-medium text-slate-400">
+                      {rule.isEnabled ? 'Aktif' : 'Nonaktif'}
+                    </p>
                   </div>
-                  <h3 className="text-sm font-bold text-white">{rule.title}</h3>
+                  <h3 className="text-xs font-semibold text-white">{rule.title}</h3>
                 </div>
 
                 <button
                   onClick={() => toggleRule(rule.id)}
-                  className={`p-2 rounded-xl border transition-all ${
+                  className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
                     rule.isEnabled
-                      ? 'bg-cyan-500 text-black border-cyan-400 font-bold'
-                      : 'bg-slate-800 text-slate-400 border-slate-700'
+                      ? 'bg-slate-800 text-cyan-400 border-slate-700'
+                      : 'bg-slate-950 text-slate-500 border-slate-800'
                   }`}
                   title={rule.isEnabled ? 'Nonaktifkan Rule' : 'Aktifkan Rule'}
                 >
-                  <Power className="w-4 h-4" />
+                  <Power className="w-3.5 h-3.5" />
                 </button>
               </div>
 
-              {/* IF - THEN Visual Logic Box */}
-              <div className="my-4 space-y-2 text-xs">
-                {/* IF Condition */}
-                <div className="p-3 rounded-xl bg-[#080E1B] border border-slate-800/80 flex items-start gap-2.5">
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-black bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                    JIKA (IF)
-                  </span>
-                  <div className="text-slate-300 font-medium leading-relaxed">
-                    {rule.conditionText}
-                  </div>
+              {/* Logic Box */}
+              <div className="my-3 space-y-2 text-xs">
+                <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800/80">
+                  <p className="text-[10px] font-mono font-semibold text-amber-400 uppercase mb-0.5">Kondisi (IF):</p>
+                  <p className="text-slate-300 text-xs">{rule.conditionText}</p>
                 </div>
 
-                {/* THEN Action */}
-                <div className="p-3 rounded-xl bg-[#080E1B] border border-slate-800/80 flex items-start gap-2.5">
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                    MAKA (THEN)
-                  </span>
-                  <div className="text-emerald-300 font-medium leading-relaxed">
-                    {rule.actionText}
-                  </div>
+                <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800/80">
+                  <p className="text-[10px] font-mono font-semibold text-emerald-400 uppercase mb-0.5">Aksi (THEN):</p>
+                  <p className="text-slate-300 text-xs">{rule.actionText}</p>
                 </div>
               </div>
 
               {/* Footer and Test Trigger */}
-              <div className="pt-3 border-t border-slate-800 flex items-center justify-between text-xs">
-                <span className="text-slate-400 text-[11px]">
-                  Terakhir: <span className="text-slate-300 font-mono">{rule.lastTriggered || '-'}</span> • {rule.triggerCount}x Terpicu
-                </span>
+              <div className="pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-xs">
+                <p className="text-slate-400 text-[11px]">
+                  Pemicu: <span className="text-slate-300 font-mono">{rule.triggerCount}x</span>
+                </p>
 
                 <button
                   onClick={() => handleTestRule(rule)}
-                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 font-semibold text-xs border border-slate-700 transition-all flex items-center gap-1.5"
+                  className="px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium text-xs border border-slate-700 transition-colors flex items-center gap-1.5 cursor-pointer"
                 >
                   <Play className="w-3 h-3 fill-current" />
-                  <span>Uji Eksekusi</span>
+                  <p>Uji Aturan</p>
                 </button>
               </div>
             </div>
