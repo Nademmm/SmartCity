@@ -31,9 +31,14 @@ class Visualizer:
             # Gambar Bounding Box dengan efek garis tebal halus
             cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
 
-            # Label Teks (misal: "Car #12 [88%]")
-            id_text = f"#{track_id}" if track_id is not None else ""
-            label = f"{class_name} {id_text} ({int(confidence * 100)}%)"
+            # Gambar Titik Tengah (Centroid) persis seperti repo codewithaarohi
+            cx = (x1 + x2) // 2
+            cy = (y1 + y2) // 2
+            cv2.circle(annotated_frame, (cx, cy), 4, (0, 0, 255), -1)
+
+            # Label Teks persis seperti repo codewithaarohi (ID: <id> <class_name> <conf>)
+            id_text = f"ID: {track_id} " if track_id is not None else ""
+            label = f"{id_text}{class_name} {int(confidence * 100)}%"
 
             # Background label kecil
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
@@ -41,59 +46,44 @@ class Visualizer:
             cv2.putText(annotated_frame, label, (x1 + 3, y1 - 4),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1, cv2.LINE_AA)
 
-        # 2. Gambar HUD Panel Transparan di Pojok Kiri Atas
-        panel_w = 340
-        panel_h = 210
-        
+        # 2. Gambar HUD Mini Badge di Pojok Kanan Atas (Agar tidak menutupi tengah frame/objek kamera)
+        panel_w = 230
+        panel_h = 100
+        x_panel = w - panel_w - 12
+        y_panel = 12
+
         # Semi-transparent overlay box
         overlay = annotated_frame.copy()
-        cv2.rectangle(overlay, (15, 15), (15 + panel_w, 15 + panel_h), (10, 15, 26), -1)
-        cv2.rectangle(overlay, (15, 15), (15 + panel_w, 15 + panel_h), (50, 60, 80), 1)
+        cv2.rectangle(overlay, (x_panel, y_panel), (x_panel + panel_w, y_panel + panel_h), (10, 15, 26), -1)
+        cv2.rectangle(overlay, (x_panel, y_panel), (x_panel + panel_w, y_panel + panel_h), (50, 60, 80), 1)
         cv2.addWeighted(overlay, 0.85, annotated_frame, 0.15, 0, annotated_frame)
 
         # 3. Header HUD Title
-        cv2.putText(annotated_frame, "URBANPULSE AI VISION", (30, 38),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 200, 50), 2, cv2.LINE_AA)
+        cv2.putText(annotated_frame, "URBANPULSE AI", (x_panel + 10, y_panel + 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 200, 50), 1, cv2.LINE_AA)
         
-        fps_text = f"FPS: {fps:.1f}"
-        cv2.putText(annotated_frame, fps_text, (260, 38),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 180, 180), 1, cv2.LINE_AA)
+        fps_text = f"{fps:.1f} FPS"
+        cv2.putText(annotated_frame, fps_text, (x_panel + panel_w - 55, y_panel + 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.38, (180, 180, 180), 1, cv2.LINE_AA)
 
-        cv2.line(annotated_frame, (30, 48), (340, 48), (60, 70, 90), 1)
-
-        # 4. Render Status Badge (LANCAR / SEDANG / MACET TOTAL)
+        # 4. Status Badge Ringkas
         status_text = detection_result["status"]
         status_color = detection_result["status_color"]
-
-        # Background badge status
-        cv2.rectangle(annotated_frame, (30, 58), (340, 92), status_color, -1)
-        
-        # Text status (Kontras Hitam/Putih)
+        cv2.rectangle(annotated_frame, (x_panel + 10, y_panel + 30), (x_panel + panel_w - 10, y_panel + 55), status_color, -1)
         text_color = (255, 255, 255) if status_text == "MACET TOTAL" else (0, 0, 0)
-        cv2.putText(annotated_frame, f"STATUS: {status_text}", (40, 81),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, text_color, 2, cv2.LINE_AA)
+        cv2.putText(annotated_frame, status_text, (x_panel + 16, y_panel + 48),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, text_color, 1, cv2.LINE_AA)
 
-        # 5. Render Detail Statistik Kendaraan
+        # 5. Detail Statistik Ringkas
         total_v = detection_result["total_vehicles"]
-        counts = detection_result["counts"]
         density_p = detection_result["density_percent"]
+        cv2.putText(annotated_frame, f"Kendaraan: {total_v} Unit ({density_p}%)",
+                    (x_panel + 10, y_panel + 74), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (230, 230, 230), 1, cv2.LINE_AA)
 
-        y_offset = 115
-        cv2.putText(annotated_frame, f"Total Kendaraan : {total_v} Unit ({density_p}% Density)",
-                    (30, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (240, 240, 240), 1, cv2.LINE_AA)
-
-        y_offset += 20
-        breakdown_text = f"Mobil: {counts['car']}  |  Motor: {counts['motorcycle']}  |  Bus/Truk: {counts['bus'] + counts['truck']}"
-        cv2.putText(annotated_frame, breakdown_text,
-                    (30, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (180, 200, 220), 1, cv2.LINE_AA)
-
-        y_offset += 22
-        cv2.line(annotated_frame, (30, y_offset), (340, y_offset), (60, 70, 90), 1)
-
-        # 6. Status Integrasi Ke Dashboard Next.js
-        y_offset += 18
+        # 6. Status API
         sync_color = (0, 255, 150) if "200" in sync_status or "OK" in sync_status or "SYNC" in sync_status else (100, 180, 255)
-        cv2.putText(annotated_frame, f"Dashboard Next.js API : {sync_status}",
-                    (30, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.4, sync_color, 1, cv2.LINE_AA)
+        cv2.putText(annotated_frame, f"API Sync: {sync_status}",
+                    (x_panel + 10, y_panel + 90), cv2.FONT_HERSHEY_SIMPLEX, 0.35, sync_color, 1, cv2.LINE_AA)
 
         return annotated_frame
+

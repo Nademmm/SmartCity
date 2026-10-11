@@ -29,41 +29,34 @@ YOLO_IMGSZ = int(os.getenv("YOLO_IMGSZ", "320")) # 320px membuat inferensi CPU 4
 # ==============================================================
 MODEL_PATH = os.getenv("MODEL_PATH", "yolo11n.pt")
 
-# Confidence threshold 0.15 lebih sensitif untuk deteksi kendaraan miniatur kecil (HotWheels/diecast)
-# Naikan ke 0.22-0.30 jika terlalu banyak false positive
-CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.15"))
+# Confidence threshold 0.26 (Akurat, cerdas, tidak mendeteksi barang acak/meja/buku/HP)
+CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.26"))
 IOU_THRESHOLD = float(os.getenv("IOU_THRESHOLD", "0.45"))
 
 # Agnostic NMS: satu objek tidak bisa punya 2 bbox dari kelas berbeda → tracking lebih stabil
 AGNOSTIC_NMS = os.getenv("AGNOSTIC_NMS", "true").lower() == "true"
 
 # Augmented inference: jalankan multi-scale TTA (Test Time Augmentation) untuk tangkap objek kecil
-# PERINGATAN: augment=True memperlambat ~2x, aktifkan hanya jika butuh akurasi lebih pada miniatur
 AUGMENT_INFERENCE = os.getenv("AUGMENT_INFERENCE", "false").lower() == "true"
 
 # Mode Filter Deteksi Objek:
-# Set DETECT_ANY_OBJECT = True agar bisa mendeteksi berbagai item/objek nyata di miniatur (orang, mobil, hp, botol, dll)
-DETECT_ANY_OBJECT = os.getenv("DETECT_ANY_OBJECT", "true").lower() == "true"
+# Set DETECT_ANY_OBJECT = False agar HANYA mendeteksi kendaraan (Mobil, Truk, Bus, Motor, Sepeda)
+DETECT_ANY_OBJECT = False
 
-# COCO class IDs:
-TARGET_CLASSES = [0, 1, 2, 3, 5, 7, 9, 11, 39, 41, 63, 67, 73]
-EXCLUDE_CLASSES = []
+# COCO vehicle class IDs HANYA kendaraan jalan raya:
+# 1: bicycle, 2: car, 3: motorcycle, 5: bus, 7: truck
+TARGET_CLASSES = [1, 2, 3, 5, 7]
+EXCLUDE_CLASSES = [0] # 0 = Person (DITOLAK TOTAL)
 
 CLASS_NAMES = {
-    0: "Person",
     1: "Bicycle",
     2: "Car",
     3: "Motorcycle",
     5: "Bus",
-    7: "Truck",
-    9: "Traffic Light",
-    11: "Stop Sign",
-    39: "Bottle",
-    41: "Cup",
-    63: "Laptop",
-    67: "Cell Phone",
-    73: "Book"
+    7: "Truck"
 }
+
+
 
 # ==============================================================
 # 3. Threshold Logika Bisnis Klasifikasi Kemacetan
@@ -85,3 +78,5 @@ TELEMETRY_INTERVAL_SEC = float(os.getenv("TELEMETRY_INTERVAL_SEC", "1.5"))
 # ==============================================================
 ENABLE_STREAM_SERVER = os.getenv("ENABLE_STREAM_SERVER", "true").lower() == "true"
 STREAM_SERVER_PORT = int(os.getenv("STREAM_SERVER_PORT", "8088"))
+SHOW_GUI_WINDOW = os.getenv("SHOW_GUI_WINDOW", "false").lower() == "true"
+

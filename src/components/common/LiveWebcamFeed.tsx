@@ -37,56 +37,38 @@ interface DetectedItem {
   isNested?: boolean;
 }
 
-// Terjemahan ramah label COCO 80 kelas ke Bahasa Indonesia & penetapan warna
+// Kamus Label Khusus Kendaraan & Mobil Miniatur / Lego
 const LABEL_MAP: Record<string, { label: string; category: DetectedItem['category']; color: string }> = {
-  // Kendaraan
-  car: { label: 'Mobil', category: 'vehicle', color: '#10B981' }, // Hijau emerald
+  car: { label: 'Mobil (Lego/Miniatur)', category: 'vehicle', color: '#10B981' }, // Hijau emerald
+  'toy car': { label: 'Mobil (Lego/Miniatur)', category: 'vehicle', color: '#10B981' },
+  'miniature car': { label: 'Mobil Miniatur', category: 'vehicle', color: '#10B981' },
+  truck: { label: 'Truk / Pick-up (Lego)', category: 'vehicle', color: '#EF4444' }, // Merah
+  bus: { label: 'Bus (Lego/Miniatur)', category: 'vehicle', color: '#F59E0B' }, // Amber
   motorcycle: { label: 'Motor', category: 'vehicle', color: '#06B6D4' }, // Cyan
-  bus: { label: 'Bus', category: 'vehicle', color: '#F59E0B' }, // Amber
-  truck: { label: 'Truk', category: 'vehicle', color: '#EF4444' }, // Merah
   bicycle: { label: 'Sepeda', category: 'vehicle', color: '#14B8A6' }, // Teal
   train: { label: 'Kereta', category: 'vehicle', color: '#8B5CF6' },
   airplane: { label: 'Pesawat', category: 'vehicle', color: '#3B82F6' },
   boat: { label: 'Perahu', category: 'vehicle', color: '#0EA5E9' },
-
-  // Pejalan Kaki & Manusia
-  person: { label: 'Orang / Pejalan Kaki', category: 'person', color: '#A855F7' }, // Ungu
-
-  // Infrastruktur Lalin
-  'traffic light': { label: 'Lampu Lalu Lintas', category: 'infrastructure', color: '#EAB308' },
-  'stop sign': { label: 'Rambu Stop', category: 'infrastructure', color: '#DC2626' },
-  'parking meter': { label: 'Meter Parkir', category: 'infrastructure', color: '#64748B' },
-  bench: { label: 'Bangku', category: 'infrastructure', color: '#64748B' },
-
-  // Berbagai Item Umum / Miniatur di Meja
-  'cell phone': { label: 'Smartphone / HP', category: 'item', color: '#38BDF8' },
-  bottle: { label: 'Botol', category: 'item', color: '#0284C7' },
-  cup: { label: 'Cangkir / Gelas', category: 'item', color: '#FB923C' },
-  chair: { label: 'Kursi / Miniatur', category: 'item', color: '#F43F5E' },
-  book: { label: 'Buku', category: 'item', color: '#EC4899' },
-  laptop: { label: 'Laptop', category: 'item', color: '#6366F1' },
-  mouse: { label: 'Mouse', category: 'item', color: '#84CC16' },
-  keyboard: { label: 'Keyboard', category: 'item', color: '#10B981' },
-  remote: { label: 'Remote', category: 'item', color: '#F97316' },
-  clock: { label: 'Jam', category: 'item', color: '#FBBF24' },
-  backpack: { label: 'Tas Ransel', category: 'item', color: '#D946EF' },
-  handbag: { label: 'Tas Tangan', category: 'item', color: '#E11D48' },
-  umbrella: { label: 'Payung', category: 'item', color: '#06B6D4' },
-  scissors: { label: 'Gunting', category: 'item', color: '#64748B' },
-  bowl: { label: 'Mangkuk', category: 'item', color: '#F59E0B' },
-  box: { label: 'Kotak / Kardus', category: 'item', color: '#78716C' },
-  pen: { label: 'Pulpen / Alat Tulis', category: 'item', color: '#3B82F6' },
 };
 
-// Kategori Prioritas: Kendaraan nomor 1 untuk analisis lalu lintas
-const VEHICLE_CLASSES = new Set(['car', 'motorcycle', 'bus', 'truck', 'bicycle', 'train']);
-const TRAFFIC_CLASSES = new Set(['traffic light', 'stop sign']);
+// Daftar Kelas yang Diizinkan: HANYA KENDARAAN & MOBIL MINIATUR
+const VEHICLE_CLASSES = new Set([
+  'car',
+  'toy car',
+  'miniature car',
+  'truck',
+  'bus',
+  'motorcycle',
+  'bicycle',
+  'train',
+  'airplane',
+  'boat',
+]);
 
 function getCategoryPriority(itemClass: string): number {
   const c = itemClass.toLowerCase();
-  if (VEHICLE_CLASSES.has(c)) return 3; // Prioritas 1: Kendaraan (Utama)
-  if (c === 'person' || TRAFFIC_CLASSES.has(c)) return 2; // Prioritas 2: Pejalan Kaki & Rambu
-  return 1; // Prioritas 3: Barang / Objek Lain
+  if (VEHICLE_CLASSES.has(c)) return 3;
+  return 0;
 }
 
 interface RawBox {
@@ -208,7 +190,8 @@ interface VisionMemory {
   bgLum: Float32Array | null;
 }
 
-// Mesin Computer Vision Cerdas Multi-Fitur (Analisis Gerak, Kontras, Gradien Tepi, Kromatis Kulit, dan Bentuk Geometri)
+// Mesin Computer Vision Khusus Kendaraan & Mobil Miniatur / Lego
+// Menghapus total deteksi orang / wajah dan barang umum non-kendaraan
 async function detectNativeVision(
   video: HTMLVideoElement,
   canvas: HTMLCanvasElement,
@@ -218,45 +201,12 @@ async function detectNativeVision(
 ): Promise<RawBox[]> {
   const results: RawBox[] = [];
 
-  // 1. Hardware-Accelerated FaceDetector API (Chrome & Edge bawaan)
-  let foundFace = false;
-  let faceBox: [number, number, number, number] | null = null;
-
-  if (typeof window !== 'undefined' && 'FaceDetector' in window) {
-    try {
-      const faceDetector = new (window as any).FaceDetector({ fastMode: true, maxDetectedFaces: 4 });
-      const faces = await faceDetector.detect(video);
-      if (faces && Array.isArray(faces) && faces.length > 0) {
-        for (const face of faces) {
-          const fb = face.boundingBox;
-          if (fb && fb.width > 18 && fb.height > 18) {
-            foundFace = true;
-            // Bentangkan kotak wajah ke torso / bahu manusia
-            const padX = fb.width * 0.4;
-            const x = Math.max(0, fb.x - padX);
-            const w = Math.min(vw - x, fb.width + padX * 2);
-            const y = Math.max(0, fb.y - fb.height * 0.15);
-            const h = Math.min(vh - y, fb.height * 2.8);
-            faceBox = [x, y, w, h];
-            results.push({
-              class: 'person',
-              score: 0.96,
-              bbox: [x, y, w, h],
-            });
-          }
-        }
-      }
-    } catch {
-      // Fallback ke analisis canvas
-    }
-  }
-
-  // 2. Analisis Spasial & Temporal Canvas Resolusi 160x120 (~1.5ms)
+  // Analisis Spasial & Temporal Canvas Resolusi 168x126 (~1.8ms)
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return results;
 
-  const targetW = 160;
-  const targetH = 120;
+  const targetW = 168;
+  const targetH = 126;
   canvas.width = targetW;
   canvas.height = targetH;
   ctx.drawImage(video, 0, 0, targetW, targetH);
@@ -269,20 +219,16 @@ async function detectNativeVision(
   }
 
   const data = imgData.data;
-  const cols = 20; // 20 kolom (blok 8x8 px)
-  const rows = 15; // 15 baris
+  const cols = 28; // 28 kolom (grid 6x6 px per cell untuk menangkap lego kecil)
+  const rows = 21; // 21 baris
   const cellW = targetW / cols;
   const cellH = targetH / rows;
   const totalBlocks = cols * rows;
 
   const curLumArray = new Float32Array(totalBlocks);
+  const curSatArray = new Float32Array(totalBlocks);
   const gridSkin = Array.from({ length: rows }, () => new Array(cols).fill(0));
   const gridObject = Array.from({ length: rows }, () => new Array(cols).fill(0));
-  const gridLum = Array.from({ length: rows }, () => new Float32Array(cols));
-  const gridEdge = Array.from({ length: rows }, () => new Float32Array(cols));
-  const gridSat = Array.from({ length: rows }, () => new Float32Array(cols));
-
-  let sceneLumSum = 0;
 
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
@@ -314,22 +260,22 @@ async function detectNativeVision(
           totalLum += lum;
           count++;
 
-          // Gradien tepi horizontal & vertikal sederhana
+          // Gradien tepi horizontal & vertikal
           if (x + 2 < targetW) {
             const nextIdx = (y * targetW + (x + 2)) * 4;
             const diffX = Math.abs(red - data[nextIdx]) + Math.abs(green - data[nextIdx + 1]);
             edgeEnergy += diffX;
           }
 
-          // Cek kromatis warna kulit manusia
+          // Cek kromatis kulit (hanya untuk mengisolasi tangan agar tidak dikira mobil)
           if (
-            red > 70 &&
-            green > 35 &&
-            blue > 18 &&
+            red > 65 &&
+            green > 30 &&
+            blue > 15 &&
             red > green &&
             red > blue &&
-            red - Math.min(green, blue) > 10 &&
-            Math.abs(red - green) > 8
+            red - Math.min(green, blue) > 8 &&
+            Math.abs(red - green) > 6
           ) {
             skinCount++;
           }
@@ -345,89 +291,76 @@ async function detectNativeVision(
       const colorSat = Math.max(Math.abs(avgR - avgG), Math.abs(avgG - avgB), Math.abs(avgB - avgR));
 
       curLumArray[bIdx] = avgLum;
-      gridLum[r][c] = avgLum;
-      gridEdge[r][c] = avgEdge;
-      gridSat[r][c] = colorSat;
-      sceneLumSum += avgLum;
+      curSatArray[bIdx] = colorSat;
 
+      // Tandai kulit manusia agar disaring
       if (skinRatio > 0.22) {
         gridSkin[r][c] = 1;
       }
+    }
+  }
 
-      // Deteksi perubahan temporal (ketika barang baru muncul / digerakkan ke depan kamera)
-      const prevL = memory.prevLum ? memory.prevLum[bIdx] : avgLum;
-      const bgL = memory.bgLum ? memory.bgLum[bIdx] : avgLum;
-      const motionDelta = Math.abs(avgLum - prevL);
-      const bgDelta = Math.abs(avgLum - bgL);
+  // Hitung rata-rata luminansi latar lantai/ruangan (lantai terang/ubin)
+  let floorLumSum = 0;
+  let floorLumCount = 0;
+  for (let i = 0; i < totalBlocks; i++) {
+    floorLumSum += curLumArray[i];
+    floorLumCount++;
+  }
+  const avgSceneLum = floorLumCount > 0 ? floorLumSum / floorLumCount : 128;
 
-      // Kriteria deteksi objek terarah:
-      // Hanya barang nyata yang bergerak di depan kamera atau memiliki kontras sangat tegas
-      const isSalientForeground =
-        motionDelta > 22 || // Gerakan objek nyata di depan kamera
-        (bgDelta > 32 && avgEdge > 24) || // Beda latar belakang tinggi dengan tepian tegas
-        (avgEdge > 36 && colorSat > 28); // Objek dengan warna jenuh dan tepi sangat kontras
+  // Analisis blok: Mobil lego memiliki tepi kontras (roda hitam, kaca, kap mobil)
+  // dan kontras tajam terhadap lantai/ubin di sekitarnya
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (gridSkin[r][c] === 1) continue;
 
-      // Jika bukan bagian dari manusia dan merupakan foreground aktif
-      if (isSalientForeground && gridSkin[r][c] === 0) {
-        // Cek jika berada di dalam area tubuh manusia yang sudah terdeteksi
-        if (faceBox) {
-          const blockVW = (c / cols) * vw;
-          const blockVH = (r / rows) * vh;
-          const [fx, fy, fw, fh] = faceBox;
-          const inFace =
-            blockVW >= fx && blockVW <= fx + fw && blockVH >= fy && blockVH <= fy + fh * 0.38;
-          // Area wajah diabaikan untuk objek, tapi area dada/tangan bawah diizinkan sebagai objek bertumpuk/dipegang
-          if (!inFace) {
-            gridObject[r][c] = 1;
-          }
-        } else {
+      const bIdx = r * cols + c;
+      const lum = curLumArray[bIdx];
+
+      // Perbedaan terhadap rata-rata latar sekitar
+      const contrastToScene = Math.abs(lum - avgSceneLum);
+
+      // Cek variasi dengan blok tetangga langsung
+      let localEdge = 0;
+      const dNeigh = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+      for (const [dr, dc] of dNeigh) {
+        const nr = r + dr;
+        const nc = c + dc;
+        if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+          localEdge += Math.abs(lum - curLumArray[nr * cols + nc]);
+        }
+      }
+
+      // Cek apakah blok berbeda dari background statis (dinding, lemari, anyaman bambu)
+      const deltaBg = memory.bgLum ? Math.abs(lum - memory.bgLum[bIdx]) : 30;
+
+      // Kriteria pintar penandaan objek mobil mainan / lego:
+      // Hanya tandai jika ADA perubahan terhadap background ATAU warna jenuh khas balok lego
+      // Dinding / lemari / anyaman statis akan otomatis diabaikan karena deltaBg < 18
+      const isLegoColor = curSatArray[bIdx] > 32;
+      const isForeground = deltaBg > 22;
+
+      if ((isForeground && localEdge > 16) || (isLegoColor && localEdge > 18)) {
+        // Abaikan area paling atas frame (langit-langit / plafon / dinding atas)
+        if (r >= 3 && r <= rows - 2 && c >= 2 && c <= cols - 2) {
           gridObject[r][c] = 1;
         }
       }
     }
   }
 
-  // Update memori background & frame sebelumnya
-  if (!memory.bgLum) {
+  // Update memori background dan frame sebelumnya
+  if (!memory.bgLum || memory.bgLum.length !== totalBlocks) {
     memory.bgLum = new Float32Array(curLumArray);
   } else {
-    // Adaptasi latar belakang lambat (exponential moving average)
     for (let i = 0; i < totalBlocks; i++) {
-      memory.bgLum[i] = memory.bgLum[i] * 0.96 + curLumArray[i] * 0.04;
+      memory.bgLum[i] = memory.bgLum[i] * 0.98 + curLumArray[i] * 0.02;
     }
   }
   memory.prevLum = new Float32Array(curLumArray);
 
-  // 3. Deteksi Manusia dari klaster kulit (jika FaceDetector API browser tidak tersedia)
-  if (!foundFace) {
-    let minR = rows, maxR = -1, minC = cols, maxC = -1, skinCells = 0;
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        if (gridSkin[r][c] === 1) {
-          skinCells++;
-          if (r < minR) minR = r;
-          if (r > maxR) maxR = r;
-          if (c < minC) minC = c;
-          if (c > maxC) maxC = c;
-        }
-      }
-    }
-
-    if (skinCells >= 4 && maxR >= minR && maxC >= minC) {
-      const boxX = (minC / cols) * vw;
-      const boxY = (Math.max(0, minR - 1) / rows) * vh;
-      const boxW = Math.min(vw - boxX, ((maxC - minC + 1) / cols) * vw * 1.15);
-      const boxH = Math.min(vh - boxY, ((maxR - minR + 2) / rows) * vh * 1.35);
-      results.push({
-        class: 'person',
-        score: 0.91,
-        bbox: [boxX, boxY, boxW, boxH],
-      });
-      foundFace = true;
-    }
-  }
-
-  // 4. Klasterisasi Cerdas Benda / Objek (Termasuk Objek Bertumpuk & Objek di Dalam Objek)
+  // Klasterisasi Objek Mobil Miniatur / Lego
   const visited = Array.from({ length: rows }, () => new Array(cols).fill(false));
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
@@ -449,6 +382,10 @@ async function detectNativeVision(
             [currR + 1, currC],
             [currR, currC - 1],
             [currR, currC + 1],
+            [currR - 1, currC - 1],
+            [currR - 1, currC + 1],
+            [currR + 1, currC - 1],
+            [currR + 1, currC + 1],
           ];
           for (const [nR, nC] of neighbors) {
             if (
@@ -465,171 +402,38 @@ async function detectNativeVision(
           }
         }
 
-        // Klaster minimal 6 blok dan minimal 3.5% dari viewport untuk menghindari noise
-        if (qCount >= 6) {
+        // Filter Klaster Mobil Lego:
+        // Ukuran klaster harus proporsional dengan mobil mainan (antara 3 hingga 30 blok)
+        if (qCount >= 3 && qCount <= 70) {
           const bW = ((qMaxC - qMinC + 1) / cols) * vw;
           const bH = ((qMaxR - qMinR + 1) / rows) * vh;
           const bX = (qMinC / cols) * vw;
           const bY = (qMinR / rows) * vh;
 
-          const aspect = bW / Math.max(1, bH);
+          const maxDim = Math.max(bW, bH);
+          const minDim = Math.min(bW, bH);
+          const shapeRatio = maxDim / Math.max(1, minDim);
           const areaFraction = (bW * bH) / (vw * vh);
 
-          if (areaFraction < 0.035) continue;
+          // Mobil mainan pada jarak webcam: ukuran proporsional 0.6% hingga 20% dari layar
+          if (areaFraction < 0.006 || areaFraction > 0.20) continue;
 
-          // FITUR OBJEK BERTUMPUK & BERSARANG:
-          // Skenario 1: Objek di Dalam Satu Kotak / Kardus / Kontainer (Nested Object)
-          if ((qMaxR - qMinR + 1) >= 3 && (qMaxC - qMinC + 1) >= 3) {
-            let perimLumSum = 0;
-            let perimCount = 0;
-            for (let pr = qMinR; pr <= qMaxR; pr++) {
-              for (let pc = qMinC; pc <= qMaxC; pc++) {
-                if (pr === qMinR || pr === qMaxR || pc === qMinC || pc === qMaxC) {
-                  perimLumSum += gridLum[pr][pc];
-                  perimCount++;
-                }
-              }
-            }
-            const perimLumAvg = perimCount > 0 ? perimLumSum / perimCount : 128;
+          // Abaikan area plafon / dinding atas frame (bY < 16% dari tinggi frame)
+          if (bY < vh * 0.16) continue;
 
-            let inMinR = rows;
-            let inMaxR = -1;
-            let inMinC = cols;
-            let inMaxC = -1;
-            let inCount = 0;
+          // Mobil mainan dari atas maupun samping memiliki rasio memanjang khas kendaraan (1.25 hingga 3.4)
+          // Menolak benda bulat/persegi seperti cangkir/kertas (rasio < 1.25) dan kabel/pena (rasio > 3.4)
+          if (shapeRatio < 1.25 || shapeRatio > 3.4) continue;
 
-            for (let ir = qMinR + 1; ir <= qMaxR - 1; ir++) {
-              for (let ic = qMinC + 1; ic <= qMaxC - 1; ic++) {
-                const lumDiff = Math.abs(gridLum[ir][ic] - perimLumAvg);
-                if (lumDiff > 13 || gridEdge[ir][ic] > 14 || gridSat[ir][ic] > 16) {
-                  inCount++;
-                  if (ir < inMinR) inMinR = ir;
-                  if (ir > inMaxR) inMaxR = ir;
-                  if (ic < inMinC) inMinC = ic;
-                  if (ic > inMaxC) inMaxC = ic;
-                }
-              }
-            }
+          let itemClass = 'car';
+          let itemScore = 0.95;
 
-            // Jika ada objek internal di dalam kotak
-            if (inCount >= 1 && inMaxR >= inMinR && inMaxC >= inMinC) {
-              const inW = ((inMaxC - inMinC + 1) / cols) * vw;
-              const inH = ((inMaxR - inMinR + 1) / rows) * vh;
-              const inX = (inMinC / cols) * vw;
-              const inY = (inMinR / rows) * vh;
-              const inAspect = inW / Math.max(1, inH);
-
-              // Jika objek dalam mencakup proporsi yang wajar di dalam kotak
-              if (inW < bW * 0.92 || inH < bH * 0.92) {
-                const innerClass = inAspect < 0.65 ? 'cell phone' : inAspect > 1.35 ? 'book' : 'cup';
-                const outerClass = aspect > 1.3 && areaFraction > 0.14 ? 'laptop' : 'box';
-
-                // Kotak luar (kontainer)
-                results.push({
-                  class: outerClass,
-                  score: 0.91,
-                  bbox: [bX, bY, bW, bH],
-                });
-
-                // Objek yang bersarang di dalam kotak
-                results.push({
-                  class: innerClass,
-                  score: 0.94,
-                  bbox: [inX, inY, inW, inH],
-                });
-                continue;
-              }
-            }
-          }
-
-          // Skenario 2: Dua objek bertumpuk / berdempetan secara horizontal
-          if (aspect > 1.95 && bW > vw * 0.16) {
-            const halfW = bW * 0.48;
-            const leftClass = qMinR >= rows / 3 ? 'car' : 'item';
-            const rightClass = qMinR >= rows / 3 ? 'car' : 'box';
-            results.push({
-              class: leftClass,
-              score: 0.93,
-              bbox: [bX, bY, halfW, bH],
-            });
-            results.push({
-              class: rightClass,
-              score: 0.91,
-              bbox: [bX + bW * 0.52, bY, halfW, bH],
-            });
-            continue;
-          }
-
-          // Skenario 3: Objek bertumpuk secara vertikal (misal botol/cangkir di atas kotak atau meja)
-          if (aspect < 0.62 && bH > vh * 0.28) {
-            const halfH = bH * 0.48;
-            results.push({
-              class: 'bottle',
-              score: 0.92,
-              bbox: [bX, bY, bW, halfH],
-            });
-            results.push({
-              class: 'box',
-              score: 0.89,
-              bbox: [bX, bY + bH * 0.52, bW, halfH],
-            });
-            continue;
-          }
-
-          // Skenario 4: Objek di dalam area orang (misal HP atau cangkir dipegang orang)
-          if (faceBox) {
-            const [fx, fy, fw, fh] = faceBox;
-            const isInsidePerson =
-              bX >= fx - fw * 0.1 &&
-              bX + bW <= fx + fw * 1.1 &&
-              bY >= fy + fh * 0.3 &&
-              bY + bH <= fy + fh * 1.1;
-
-            if (isInsidePerson) {
-              const itemClass = aspect < 0.8 ? 'cell phone' : 'cup';
-              results.push({
-                class: itemClass,
-                score: 0.94,
-                bbox: [bX, bY, bW, bH],
-              });
-              continue;
-            }
-          }
-
-          // Klasifikasi Geometri Standar untuk Objek Tunggal
-          let itemClass = 'cell phone';
-          let itemScore = 0.88;
-
-          if (aspect > 1.25 && qMinR >= rows / 3) {
-            if (aspect > 2.0) {
-              itemClass = 'truck';
-              itemScore = 0.91;
-            } else {
-              itemClass = 'car';
-              itemScore = 0.93;
-            }
-          } else if (aspect < 0.65) {
-            if (bH > vh * 0.35) {
-              itemClass = 'bottle';
-              itemScore = 0.92;
-            } else {
-              itemClass = 'cell phone';
-              itemScore = 0.94;
-            }
-          } else if (aspect >= 0.7 && aspect <= 1.25) {
-            if (areaFraction < 0.08) {
-              itemClass = 'cup';
-              itemScore = 0.89;
-            } else {
-              itemClass = 'box';
-              itemScore = 0.87;
-            }
-          } else if (aspect > 1.3 && areaFraction > 0.15) {
-            itemClass = bY > vh * 0.4 ? 'laptop' : 'book';
-            itemScore = 0.89;
+          if (shapeRatio > 2.2) {
+            itemClass = 'truck';
+            itemScore = 0.96;
           } else {
-            itemClass = 'item';
-            itemScore = 0.85;
+            itemClass = 'car';
+            itemScore = 0.96;
           }
 
           results.push({
@@ -642,7 +446,7 @@ async function detectNativeVision(
     }
   }
 
-  return results.slice(0, 3); // Maksimal 3 objek paling tegas pada mode offline
+  return results.slice(0, 3); // Maksimal 3 mobil mainan
 }
 
 export const LiveWebcamFeed: React.FC = () => {
@@ -677,16 +481,66 @@ export const LiveWebcamFeed: React.FC = () => {
   const [activeFps, setActiveFps] = useState<number>(30);
   const [isModelLoading, setIsModelLoading] = useState<boolean>(false);
   const [modelStatusText, setModelStatusText] = useState<string>('Vision AI Native Aktif (Deteksi Instan)');
-
-  // Settings
-  const [filterMode, setFilterMode] = useState<'all' | 'vehicles' | 'traffic_pedestrian'>('all');
-  const [minConfidence, setMinConfidence] = useState<number>(0.35); // 35% default seimbang dan cerdas, memprioritaskan kendaraan
+  const [minConfidence, setMinConfidence] = useState<number>(0.25); // Sensitif untuk kendaraan & mainan lego
 
   // Real-time detected items list
   const [detectedItems, setDetectedItems] = useState<DetectedItem[]>([]);
 
-  // 1. Script Loader Asinkron: Mengaktifkan TensorFlow + COCO-SSD tanpa memblokir deteksi instan
+  // Mode Feed: 'yolo11' (Backend Python YOLO11 Tracking Class-wise Server) atau 'browser' (In-Browser Camera)
+  const [feedMode, setFeedMode] = useState<'yolo11' | 'browser'>('yolo11');
+  const [yoloStreamOnline, setYoloStreamOnline] = useState<boolean>(true);
+  const [yoloCameraSource, setYoloCameraSource] = useState<number>(0);
+  const [isSwitchingYoloCam, setIsSwitchingYoloCam] = useState<boolean>(false);
+
+  // Sync status sumber kamera YOLO11 dari port 8088
   useEffect(() => {
+    let active = true;
+    const checkYoloCam = async () => {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 1200);
+        const res = await fetch('http://localhost:8088/camera_status', {
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        if (res.ok) {
+          const data = await res.json();
+          if (active && typeof data.current_source === 'number') {
+            setYoloCameraSource(data.current_source);
+          }
+        }
+      } catch {
+        // Backend offline / standby
+      }
+    };
+    checkYoloCam();
+    const interval = setInterval(checkYoloCam, 5000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  const switchYoloCamera = async (sourceId: number) => {
+    setIsSwitchingYoloCam(true);
+    try {
+      const res = await fetch(`http://localhost:8088/switch_camera?source=${sourceId}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setYoloCameraSource(sourceId);
+        }
+      }
+    } catch (e) {
+      console.warn('Gagal beralih kamera YOLO11:', e);
+    } finally {
+      setIsSwitchingYoloCam(false);
+    }
+  };
+
+  // 1. Script Loader Asinkron: Hanya dimuat jika pengguna beralih ke mode browser
+  useEffect(() => {
+    if (feedMode !== 'browser') return;
     let isMounted = true;
 
     const loadScriptWithTimeout = (src: string, timeoutMs = 7000): Promise<void> => {
@@ -858,9 +712,23 @@ export const LiveWebcamFeed: React.FC = () => {
       setActiveFps(30);
 
       const refreshedDevices = await getCameraDevices();
+      const usbDevice = refreshedDevices.find(
+        (d) =>
+          d.label.toLowerCase().includes('logitech') ||
+          d.label.toLowerCase().includes('usb') ||
+          d.label.toLowerCase().includes('c930')
+      );
+
       if (targetId) {
         selectedDeviceIdRef.current = targetId;
         setSelectedDeviceId(targetId);
+      } else if (usbDevice && !selectedDeviceIdRef.current) {
+        selectedDeviceIdRef.current = usbDevice.deviceId;
+        setSelectedDeviceId(usbDevice.deviceId);
+        if (track && !track.label.toLowerCase().includes('logitech') && !track.label.toLowerCase().includes('usb')) {
+          startCamera(usbDevice.deviceId);
+          return;
+        }
       } else if (refreshedDevices.length > 0 && !selectedDeviceIdRef.current) {
         selectedDeviceIdRef.current = refreshedDevices[0].deviceId;
         setSelectedDeviceId(refreshedDevices[0].deviceId);
@@ -928,17 +796,30 @@ export const LiveWebcamFeed: React.FC = () => {
     setDetectedItems([]);
   }, [setIsCameraConnected]);
 
-  // Initial auto mount: Berjalan tepat 1x saat komponen dipasang
+  // Sinkronisasi status kamera ke context SmartCity
   useEffect(() => {
-    if (hasMountedRef.current) return;
-    hasMountedRef.current = true;
+    if (feedMode === 'yolo11') {
+      setIsCameraConnected(yoloStreamOnline);
+    } else {
+      setIsCameraConnected(isStreaming);
+    }
+  }, [feedMode, yoloStreamOnline, isStreaming, setIsCameraConnected]);
 
-    startCamera();
+  // Kelola lifecycle kamera browser secara lazy (Hanya aktifkan jika user membuka mode browser)
+  useEffect(() => {
+    if (feedMode === 'browser') {
+      startCamera();
+    } else {
+      stopCamera();
+    }
+  }, [feedMode, startCamera, stopCamera]);
 
+  // Cleanup saat komponen dibongkar / pindah tab
+  useEffect(() => {
     return () => {
       stopCamera();
     };
-  }, [startCamera, stopCamera]);
+  }, [stopCamera]);
 
   // 6. REAL OBJECT DETECTION LOOP (Berjalan cepat setiap 120ms / ~8 FPS untuk responsivitas instan)
   useEffect(() => {
@@ -955,46 +836,42 @@ export const LiveWebcamFeed: React.FC = () => {
 
       const rawPredictions: RawBox[] = [];
 
-      // A. Jika Model COCO-SSD sudah siap di memori browser, deteksi 80 kelas dengan akurasi tinggi
+      // A. Jika Model COCO-SSD siap, HANYA ambil prediksi yang merupakan KENDARAAN
       if (modelRef.current) {
         try {
           const cocoPredictions = await modelRef.current.detect(video);
           for (const p of cocoPredictions) {
-            const isVehicle = VEHICLE_CLASSES.has(p.class.toLowerCase());
-            // Kendaraan diprioritaskan: threshold sensitif (0.28) agar kendaraan cepat tertangkap,
-            // sedangkan barang umum memerlukan confidence minConfidence (default 0.35) agar tidak ada noise acak
-            const threshold = isVehicle ? Math.min(minConfidence, 0.28) : minConfidence;
-            if (p.score >= threshold) {
-              rawPredictions.push({
-                class: p.class,
-                score: p.score,
-                bbox: p.bbox,
-              });
+            const rawCls = p.class.toLowerCase();
+            // HANYA terima kelas kendaraan dan miniatur mobil, tolak person dan semua item lain!
+            if (VEHICLE_CLASSES.has(rawCls)) {
+              if (p.score >= 0.25) {
+                rawPredictions.push({
+                  class: rawCls,
+                  score: p.score,
+                  bbox: p.bbox,
+                });
+              }
             }
           }
         } catch (detErr) {
           console.warn('Deteksi COCO-SSD frame error:', detErr);
         }
-      } else {
-        // B. Fallback Computer Vision Native: HANYA berjalan jika COCO-SSD belum termuat (offline mode)
-        const canvas = canvasRef.current;
-        if (canvas) {
-          try {
-            const nativeResults = await detectNativeVision(video, canvas, vw, vh, visionMemoryRef.current);
-            rawPredictions.push(...nativeResults);
-          } catch (cvErr) {
-            console.warn('Deteksi native CV frame error:', cvErr);
-          }
+      }
+
+      // B. Engine Vision AI Native (Spasial, Miniatur & Handheld Lego Car Vision)
+      // Khusus melacak miniatur mobil / lego yang dipegang tangan
+      const canvas = canvasRef.current;
+      if (canvas) {
+        try {
+          const nativeResults = await detectNativeVision(video, canvas, vw, vh, visionMemoryRef.current);
+          rawPredictions.push(...nativeResults);
+        } catch (cvErr) {
+          console.warn('Deteksi native CV frame error:', cvErr);
         }
       }
 
-      // Prioritaskan pengurutan: KENDARAAN SELALU TERATAS, lalu berdasarkan skor keyakinan
-      const sortedRaw = [...rawPredictions].sort((a, b) => {
-        const pA = getCategoryPriority(a.class);
-        const pB = getCategoryPriority(b.class);
-        if (pA !== pB) return pB - pA;
-        return b.score - a.score;
-      });
+      // Prioritaskan pengurutan berdasarkan skor keyakinan
+      const sortedRaw = [...rawPredictions].sort((a, b) => b.score - a.score);
 
       // NMS Cerdas: Hapus duplikat hanya untuk kelas identik yang tumpang tindih tinggi (IoU > 0.55)
       const dedupedPredictions: RawBox[] = [];
@@ -1007,15 +884,8 @@ export const LiveWebcamFeed: React.FC = () => {
         }
       }
 
-      // Terapkan filter kategori jika dipilih
-      let filtered = dedupedPredictions;
-      if (filterMode === 'vehicles') {
-        filtered = filtered.filter((p) => VEHICLE_CLASSES.has(p.class.toLowerCase()));
-      } else if (filterMode === 'traffic_pedestrian') {
-        filtered = filtered.filter(
-          (p) => VEHICLE_CLASSES.has(p.class.toLowerCase()) || p.class.toLowerCase() === 'person' || TRAFFIC_CLASSES.has(p.class.toLowerCase())
-        );
-      }
+      // Filter ketat: HANYA kendaraan dan miniatur mobil yang boleh lolos!
+      const filtered = dedupedPredictions.filter((p) => VEHICLE_CLASSES.has(p.class.toLowerCase()));
 
       // Batasi maksimal 6 objek paling prioritas (kendaraan selalu di urutan teratas)
       // agar tampilan dashboard tetap bersih, tajam, cerdas dan tidak penuh sesak
@@ -1026,34 +896,8 @@ export const LiveWebcamFeed: React.FC = () => {
       const cW = container ? container.clientWidth : 16;
       const cH = container ? container.clientHeight : 9;
 
-      // Deteksi relasi objek bertumpuk atau bersarang di dalam satu kotak
-      const processedBoxes: (RawBox & { isNested?: boolean })[] = prioritizedBoxes.map((b) => ({ ...b }));
-
-      for (let i = 0; i < processedBoxes.length; i++) {
-        for (let j = 0; j < processedBoxes.length; j++) {
-          if (i === j) continue;
-          const boxA = processedBoxes[i];
-          const boxB = processedBoxes[j];
-          const areaA = boxA.bbox[2] * boxA.bbox[3];
-          const areaB = boxB.bbox[2] * boxB.bbox[3];
-
-          // Jika boxA lebih kecil dan setidaknya 52% areanya berada di dalam boxB
-          if (areaA < areaB * 0.88) {
-            const containment = computeContainment(boxA.bbox, boxB.bbox);
-            if (containment > 0.52) {
-              boxA.isNested = true;
-            }
-          }
-        }
-      }
-
-      // Urutkan layer: Kotak besar di bawah, objek bertumpuk/di dalam di atas
-      processedBoxes.sort((a, b) => (b.bbox[2] * b.bbox[3]) - (a.bbox[2] * a.bbox[3]));
-
-      const items: DetectedItem[] = processedBoxes.map((p, idx) => {
-        const item = formatDetectedItem(p.class, p.score, p.bbox, vw, vh, cW, cH, `ITEM-${idx + 1}`);
-        item.isNested = p.isNested;
-        return item;
+      const items: DetectedItem[] = prioritizedBoxes.map((p, idx) => {
+        return formatDetectedItem(p.class, p.score, p.bbox, vw, vh, cW, cH, `ITEM-${idx + 1}`);
       });
 
       setDetectedItems(items);
@@ -1103,7 +947,7 @@ export const LiveWebcamFeed: React.FC = () => {
     detectionLoopRef.current = interval;
 
     return () => clearInterval(interval);
-  }, [isStreaming, filterMode, minConfidence, updateTrafficCameraData]);
+  }, [isStreaming, minConfidence, updateTrafficCameraData]);
 
   return (
     <div className="rounded-xl bg-slate-900/60 border border-slate-800/80 overflow-hidden flex flex-col">
@@ -1129,90 +973,131 @@ export const LiveWebcamFeed: React.FC = () => {
               </div>
             </div>
             <p className="text-[11px] text-slate-400 mt-0.5">
-              {activeCameraLabel ? `Kamera: ${activeCameraLabel}` : 'Webcam laptop/USB terhubung langsung ke dashboard.'}
+              {feedMode === 'yolo11'
+                ? `Sumber YOLO11: ${yoloCameraSource === 1 ? 'Webcam USB (Eksternal)' : 'Kamera Laptop (Internal)'} | Stream :8088`
+                : activeCameraLabel
+                ? `Kamera Browser: ${activeCameraLabel}`
+                : 'Webcam laptop/USB terhubung langsung ke dashboard.'}
             </p>
           </div>
         </div>
 
         {/* Action Controls */}
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Filter Mode Selector */}
-          <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-lg px-2 py-1">
-            <Layers className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-            <select
-              value={filterMode}
-              onChange={(e) => setFilterMode(e.target.value as any)}
-              className="bg-transparent text-slate-200 text-xs font-medium focus:outline-none cursor-pointer"
-              title="Pilih jenis objek yang dideteksi oleh AI"
+          {/* Mode Switcher: YOLO11 Tracking Engine vs Browser Local */}
+          <div className="flex items-center rounded-lg bg-slate-900 border border-slate-800 p-0.5">
+            <button
+              onClick={() => setFeedMode('yolo11')}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                feedMode === 'yolo11'
+                  ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
             >
-              <option value="all" className="bg-slate-900 text-slate-200">Semua Objek (Prioritas Kendaraan)</option>
-              <option value="traffic_pedestrian" className="bg-slate-900 text-slate-200">Kendaraan & Pejalan Kaki</option>
-              <option value="vehicles" className="bg-slate-900 text-slate-200">Khusus Kendaraan</option>
-            </select>
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>YOLO11 Tracking AI</span>
+            </button>
+            <button
+              onClick={() => setFeedMode('browser')}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                feedMode === 'browser'
+                  ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span>Webcam Browser</span>
+            </button>
           </div>
 
-          {/* Quick Switch Camera Button */}
-          <button
-            onClick={switchCamera}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium transition-colors cursor-pointer"
-            title="Beralih kamera"
-          >
-            <SwitchCamera className="w-3.5 h-3.5" />
-            <p>Ganti Kamera {devices.length > 1 ? `(${devices.length})` : ''}</p>
-          </button>
+          {feedMode === 'browser' ? (
+            <>
+              {/* Dropdown Pilihan Kamera jika terdeteksi lebih dari 1 */}
+              {devices.length > 1 ? (
+                <select
+                  value={selectedDeviceId}
+                  onChange={(e) => {
+                    const newId = e.target.value;
+                    setSelectedDeviceId(newId);
+                    startCamera(newId);
+                  }}
+                  className="bg-slate-800 text-slate-200 border border-slate-700 text-xs rounded-lg px-2 py-1 outline-none cursor-pointer max-w-[170px] truncate"
+                  title="Pilih kamera"
+                >
+                  {devices.map((d) => (
+                    <option key={d.deviceId} value={d.deviceId}>
+                      {d.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <button
+                  onClick={switchCamera}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium transition-colors cursor-pointer"
+                  title="Beralih kamera"
+                >
+                  <SwitchCamera className="w-3.5 h-3.5" />
+                  <p>Ganti Kamera</p>
+                </button>
+              )}
 
-          {/* Device Selection Dropdown if multiple */}
-          {devices.length > 0 && (
-            <select
-              value={selectedDeviceId}
-              onChange={(e) => {
-                const newId = e.target.value;
-                setSelectedDeviceId(newId);
-                startCamera(newId);
-              }}
-              className="bg-slate-900 border border-slate-800 text-slate-300 text-xs rounded-lg px-2.5 py-1 font-mono focus:outline-none max-w-[150px] truncate"
-            >
-              {devices.map((d, i) => (
-                <option key={d.deviceId || i} value={d.deviceId}>
-                  {d.label || `Kamera ${i + 1}`}
-                </option>
-              ))}
-            </select>
-          )}
-
-          {/* Toggle AI Overlay Button */}
-          <button
-            onClick={() => setShowAiOverlay(!showAiOverlay)}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
-              showAiOverlay
-                ? 'bg-slate-800 text-white border-slate-700'
-                : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
-            }`}
-            title="Tampilkan atau sembunyikan kotak deteksi AI"
-          >
-            <Scan className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Overlay Box</span>
-          </button>
-
-          {/* Start/Stop Camera Button */}
-          {isStreaming ? (
-            <button
-              onClick={stopCamera}
-              className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 border border-rose-500/30 text-xs font-medium transition-colors cursor-pointer"
-            >
-              <VideoOff className="w-3.5 h-3.5" />
-              <p>Matikan</p>
-            </button>
+              {/* Start/Stop Camera Button */}
+              {isStreaming ? (
+                <button
+                  onClick={stopCamera}
+                  className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 border border-rose-500/30 text-xs font-medium transition-colors cursor-pointer"
+                >
+                  <VideoOff className="w-3.5 h-3.5" />
+                  <p>Matikan</p>
+                </button>
+              ) : (
+                <button
+                  onClick={() => startCamera()}
+                  className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40 text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  <Video className="w-3.5 h-3.5" />
+                  <p>Nyalakan Kamera</p>
+                </button>
+              )}
+            </>
           ) : (
-            <button
-              onClick={() => startCamera()}
-              className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40 text-xs font-semibold transition-colors cursor-pointer"
-            >
-              <Video className="w-3.5 h-3.5" />
-              <p>Nyalakan Kamera</p>
-            </button>
+            <div className="flex items-center gap-2">
+              {/* Pilihan Kamera YOLO11: Laptop vs USB */}
+              <div className="flex items-center rounded-lg bg-slate-900 border border-slate-800 p-0.5 text-xs">
+                <button
+                  onClick={() => switchYoloCamera(0)}
+                  disabled={isSwitchingYoloCam}
+                  className={`px-2 py-1 rounded text-xs font-medium transition-all cursor-pointer ${
+                    yoloCameraSource === 0
+                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-semibold'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title="Gunakan Kamera Laptop Bawaan"
+                >
+                  Kamera Laptop
+                </button>
+                <button
+                  onClick={() => switchYoloCamera(1)}
+                  disabled={isSwitchingYoloCam}
+                  className={`px-2 py-1 rounded text-xs font-medium transition-all cursor-pointer ${
+                    yoloCameraSource === 1
+                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-semibold'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title="Gunakan Webcam USB Eksternal"
+                >
+                  Webcam USB
+                </button>
+              </div>
+
+              <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 rounded-lg px-2.5 py-1 text-xs font-semibold">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>YOLO11 Server Aktif</span>
+              </div>
+            </div>
           )}
         </div>
+
       </div>
 
       {/* Model Status & Sensitivity Adjustment Bar */}
@@ -1250,18 +1135,50 @@ export const LiveWebcamFeed: React.FC = () => {
         {/* Hidden Canvas for Vision Frame Processing */}
         <canvas ref={canvasRef} className="hidden" />
 
-        {/* HTML5 Native Video Stream */}
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
-          className="w-full h-full object-cover bg-black"
-        />
+        {/* YOLO11 Backend Stream (Port 8088) atau HTML5 Native Webcam */}
+        {feedMode === 'yolo11' ? (
+          <div className="relative w-full h-full flex items-center justify-center bg-black">
+            {yoloStreamOnline ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src="http://localhost:8088/video_feed"
+                alt="YOLO11 Traffic Stream"
+                className="w-full h-full object-cover"
+                onError={() => setYoloStreamOnline(false)}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center p-6 text-center space-y-3">
+                <div className="w-12 h-12 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center">
+                  <AlertCircle className="w-6 h-6" />
+                </div>
+                <h4 className="text-sm font-bold text-white">YOLO11 Stream Offline</h4>
+                <p className="text-xs text-slate-400 max-w-sm">
+                  Server YOLO11 (port 8088) belum aktif atau sedang memproses. Pastikan sistem traffic-monitor berjalan.
+                </p>
+                <button
+                  onClick={() => setYoloStreamOnline(true)}
+                  className="px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs"
+                >
+                  Muat Ulang Stream
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="w-full h-full object-cover bg-black"
+          />
+        )}
 
-        {/* Fallback / Offline Standby Screen */}
-        {!isStreaming && (
+
+        {/* Fallback / Offline Standby Screen (Khusus mode browser jika belum streaming) */}
+        {feedMode === 'browser' && !isStreaming && (
           <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center space-y-4 bg-[#030712]/95 z-10 backdrop-blur-sm">
+
             {isPermissionDenied ? (
               <div className="max-w-md p-5 rounded-2xl bg-amber-950/40 border border-amber-500/40 text-left space-y-3 shadow-2xl">
                 <div className="flex items-center gap-3">
@@ -1325,9 +1242,10 @@ export const LiveWebcamFeed: React.FC = () => {
           </div>
         )}
 
-        {/* AI HUD Computer Vision Overlay (Active when streaming) */}
-        {isStreaming && showAiOverlay && (
+        {/* AI HUD Computer Vision Overlay (Khusus mode Browser saat streaming) */}
+        {feedMode === 'browser' && isStreaming && showAiOverlay && (
           <div className="absolute inset-0 pointer-events-none z-20">
+
             {/* Top Scanning Line Animation */}
             <div
               className="absolute left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-cyan-400 to-transparent shadow-[0_0_15px_#22d3ee] animate-pulse"

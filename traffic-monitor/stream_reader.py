@@ -32,17 +32,45 @@ class ThreadedCamera:
         self.thread = None
 
     def _open_capture(self):
-        """Membuka VideoCapture dengan DirectShow (Windows) untuk USB webcam agar cepat dan minim lag."""
+        """Membuka VideoCapture dengan DirectShow (Windows). Otomatis fallback ke kamera yang ada jika target tidak tersedia."""
         if isinstance(self.src, int):
-            try:
-                cap = cv2.VideoCapture(self.src, cv2.CAP_DSHOW)
-                if cap.isOpened():
-                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                    cap.set(cv2.CAP_PROP_FPS, 30)
-                    return cap
-            except Exception:
-                pass
+            # Prioritaskan source yang diminta, lalu fallback ke kamera 0 (laptop) atau 1 (USB)
+            candidate_indices = [self.src]
+            if self.src != 0:
+                candidate_indices.append(0)
+            elif self.src != 1:
+                candidate_indices.append(1)
+
+            for idx in candidate_indices:
+                try:
+                    cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+                    if cap.isOpened():
+                        ret, test_frame = cap.read()
+                        if ret and test_frame is not None:
+                            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                            cap.set(cv2.CAP_PROP_FPS, 30)
+                            if idx != self.src:
+                                logging.info(f"Kamera {self.src} tidak menghasilkan frame, otomatis beralih ke Kamera {idx}.")
+                                self.src = idx
+                            return cap
+                        cap.release()
+                except Exception:
+                    pass
+
+                try:
+                    cap = cv2.VideoCapture(idx)
+                    if cap.isOpened():
+                        ret, test_frame = cap.read()
+                        if ret and test_frame is not None:
+                            if idx != self.src:
+                                logging.info(f"Kamera {self.src} tidak menghasilkan frame, otomatis beralih ke Kamera {idx}.")
+                                self.src = idx
+                            return cap
+                        cap.release()
+                except Exception:
+                    pass
+
             return cv2.VideoCapture(self.src)
         else:
             return cv2.VideoCapture(self.src)
@@ -94,6 +122,20 @@ class ThreadedCamera:
 
     def is_opened(self):
         return self.cap.isOpened() and self.grabbed
+
+    def switch_source(self, new_src):
+        """Beralih sumber kamera secara dinamis antara Kamera Laptop (0) dan USB Webcam (1)."""
+        logging.info(f"Mengalihkan sumber kamera ke: {new_src}")
+        with self.read_lock:
+            self.src = new_src
+            try:
+                self.cap.release()
+            except Exception:
+                pass
+            self.cap = self._open_capture()
+            self.grabbed, self.frame = self.cap.read()
+        logging.info(f"Sumber kamera berhasil dialihkan ke: {self.src}")
+        return self.is_opened()
 
     def stop(self):
         self.started = False

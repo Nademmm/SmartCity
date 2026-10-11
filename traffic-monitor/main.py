@@ -6,7 +6,7 @@ from stream_reader import ThreadedCamera
 from detector import YOLODetector
 from visualizer import Visualizer
 from dashboard_client import DashboardClient
-from mjpeg_server import MJPEGServer, update_stream_frame
+from mjpeg_server import MJPEGServer, update_stream_frame, set_camera_switch_callback
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
@@ -25,6 +25,7 @@ def main():
 
     # 1. Inisialisasi Modul
     camera = ThreadedCamera(src=config.CAMERA_SOURCE).start()
+    set_camera_switch_callback(camera.switch_source, config.CAMERA_SOURCE)
     detector = YOLODetector()
     visualizer = Visualizer()
     dashboard = DashboardClient().start()
@@ -73,16 +74,22 @@ def main():
             # 7. Update Live Stream Frame untuk Dashboard Web UI
             update_stream_frame(annotated_frame)
 
-            # 8. Tampilkan Window OpenCV Lokal
-            cv2.imshow("UrbanPulse YOLO11 Traffic Monitor", annotated_frame)
-
-            # 9. Cek Tombol Exit ('q' atau ESC)
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord('q') or key == 27:
-                logging.info("Pengguna menekan tombol Keluar ('q' / ESC). Menghentikan sistem...")
-                break
+            # 8. Tampilkan Window OpenCV Lokal jika diizinkan / ada display
+            show_gui = getattr(config, "SHOW_GUI_WINDOW", True)
+            if show_gui:
+                try:
+                    cv2.imshow("UrbanPulse YOLO11 Traffic Monitor", annotated_frame)
+                    key = cv2.waitKey(1) & 0xFF
+                    if key == ord('q') or key == 27:
+                        logging.info("Pengguna menekan tombol Keluar ('q' / ESC). Menghentikan sistem...")
+                        break
+                except Exception:
+                    time.sleep(0.01)
+            else:
+                time.sleep(0.01)
 
     except KeyboardInterrupt:
+
         logging.info("Sistem dihentikan via KeyboardInterrupt.")
     except Exception as e:
         logging.error(f"Terjadi error pada main loop: {e}", exc_info=True)
