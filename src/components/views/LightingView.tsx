@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 
 export const LightingView: React.FC = () => {
-  const { pju, setLdrValue, togglePjuDayNight, isHardwareConnected } = useSmartCity();
+  const { pju, setLdrValue, togglePjuDayNight, controlPjuManual, isHardwareConnected } = useSmartCity();
   const [currentClock, setCurrentClock] = React.useState<string>('');
 
   React.useEffect(() => {
@@ -187,6 +187,51 @@ export const LightingView: React.FC = () => {
                 <p className="text-amber-400">Ambang: 2000</p>
                 <p>4095 (Sangat Gelap)</p>
               </div>
+            </div>
+            {/* Kontrol Aktuator PJU Langsung */}
+            <div className="p-3.5 rounded-lg bg-slate-900 border border-slate-800 space-y-2 mt-3">
+              <div className="flex justify-between text-xs text-slate-300 font-medium">
+                <p>Kontrol Aktuator PJU (ESP32):</p>
+                <p className="font-mono text-cyan-400 font-bold">{pju.pjuMode || 'AUTO'}</p>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  onClick={() => controlPjuManual('ON')}
+                  className={`py-2 px-2 rounded-lg border text-xs font-medium cursor-pointer transition-colors flex items-center justify-center gap-1.5 ${
+                    pju.pjuMode === 'ON' || pju.kondisi === 'MANUAL_ON'
+                      ? 'bg-rose-500/20 border-rose-500 text-rose-300'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                  }`}
+                >
+                  <Zap className="w-3.5 h-3.5" />
+                  <span>Manual ON</span>
+                </button>
+                <button
+                  onClick={() => controlPjuManual('OFF')}
+                  className={`py-2 px-2 rounded-lg border text-xs font-medium cursor-pointer transition-colors flex items-center justify-center gap-1.5 ${
+                    pju.pjuMode === 'OFF' || pju.kondisi === 'MANUAL_OFF'
+                      ? 'bg-slate-700 border-slate-600 text-white'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                  }`}
+                >
+                  <Moon className="w-3.5 h-3.5" />
+                  <span>Manual OFF</span>
+                </button>
+                <button
+                  onClick={() => controlPjuManual('AUTO')}
+                  className={`py-2 px-2 rounded-lg border text-xs font-medium cursor-pointer transition-colors flex items-center justify-center gap-1.5 ${
+                    pju.pjuMode === 'AUTO' || !pju.pjuMode
+                      ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                  }`}
+                >
+                  <Sun className="w-3.5 h-3.5" />
+                  <span>Auto (LDR)</span>
+                </button>
+              </div>
+              <p className="text-[10px] text-slate-400">
+                Mengontrol langsung Pin 25 (LED Merah) dan Pin 26 (LED Putih) pada board ESP32.
+              </p>
             </div>
           </div>
 

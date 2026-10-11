@@ -35,14 +35,15 @@ export interface CameraTrafficData {
 export interface SmartPJUData {
   ldrValue: number; // ADC Pin 36 (0 - 4095)
   thresholdLdr: number; // Default 2000
-  kondisi: 'GELAP' | 'TERANG';
+  kondisi: 'GELAP' | 'TERANG' | 'MANUAL_ON' | 'MANUAL_OFF';
   pjuStatus: 'MENYALA' | 'MATI';
+  pjuMode?: 'AUTO' | 'ON' | 'OFF';
   ledMerah: boolean; // Pin 25
   ledPutih: boolean; // Pin 26
   pinLdr: number; // 36
   pinLedMerah: number; // 25
   pinLedPutih: number; // 26
-  jamTerakhirBeralih?: string; // Waktu terakhir beralih kondisi (contoh: "18:15:20 WIB")
+  jamTerakhirBeralih?: string; // Waktu terakhir beralih kondisi
   siklusWaktu?: 'SIANG' | 'MALAM';
 }
 

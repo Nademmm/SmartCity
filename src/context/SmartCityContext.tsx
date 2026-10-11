@@ -55,6 +55,11 @@ interface SmartCityContextType {
   setIsCameraConnected: (connected: boolean) => void;
   updateTrafficCameraData: (data: Partial<CameraTrafficData>) => void;
 
+  // Hardware Commands & Controls
+  sendCommand: (action: string, value?: any) => Promise<void>;
+  controlPjuManual: (mode: 'ON' | 'OFF' | 'AUTO') => void;
+  testBuzzerAlarm: () => void;
+
   // PJU Action Handlers
   setLdrValue: (value: number) => void;
   togglePjuDayNight: () => void;
@@ -156,8 +161,90 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   );
 
   // ==========================================================
-  // FITUR 3: SMART PJU LOGIC (MicroPython: LDR > 2000 => GELAP)
+  // PENGIRIMAN PERINTAH KE HARDWARE ESP32 (DUA ARAH)
   // ==========================================================
+  const sendCommand = useCallback(async (action: string, value?: any) => {
+    try {
+      // 1. Direct Web Serial jika port USB sedang aktif di browser
+      if (typeof window !== 'undefined' && (window as any).__urbanpulse_send_serial) {
+        try {
+          await (window as any).__urbanpulse_send_serial(action);
+          console.log('[SERIAL DIRECT] Mengirim perintah:', action);
+        } catch (e) {
+          console.warn('[SERIAL DIRECT] Gagal kirim serial langsung:', e);
+        }
+      }
+
+      // 2. Queue backend /api/iot/control agar bridge PowerShell juga bisa membaca
+      await fetch('/api/iot/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetDeviceId: 'ESP32-MINIATURE',
+          action,
+          value,
+        }),
+      });
+    } catch (err) {
+      console.error('Gagal mengirim perintah ke antrean kontrol:', err);
+    }
+  }, []);
+
+  // ==========================================================
+  // FITUR 3: SMART PJU LOGIC (AUTO LDR & MANUAL CONTROL)
+  // ==========================================================
+  const controlPjuManual = useCallback(
+    (mode: 'ON' | 'OFF' | 'AUTO') => {
+      sounds.playClick();
+      const nowTime = new Date().toLocaleTimeString('id-ID', { hour12: false }) + ' WIB';
+
+      if (mode === 'ON') {
+        sendCommand('CMD:PJU_ON');
+        setPju((prev) => ({
+          ...prev,
+          pjuMode: 'ON',
+          kondisi: 'MANUAL_ON',
+          pjuStatus: 'MENYALA',
+          ledMerah: true,
+          ledPutih: true,
+          jamTerakhirBeralih: nowTime,
+          siklusWaktu: 'MALAM',
+        }));
+        addEventLog('Smart PJU', 'Kontrol Manual: ON', 'Perintah CMD:PJU_ON dikirim (LED 25 & 26 Menyala)', 'MANUAL');
+      } else if (mode === 'OFF') {
+        sendCommand('CMD:PJU_OFF');
+        setPju((prev) => ({
+          ...prev,
+          pjuMode: 'OFF',
+          kondisi: 'MANUAL_OFF',
+          pjuStatus: 'MATI',
+          ledMerah: false,
+          ledPutih: false,
+          jamTerakhirBeralih: nowTime,
+          siklusWaktu: 'SIANG',
+        }));
+        addEventLog('Smart PJU', 'Kontrol Manual: OFF', 'Perintah CMD:PJU_OFF dikirim (LED 25 & 26 Padam)', 'MANUAL');
+      } else {
+        sendCommand('CMD:PJU_AUTO');
+        setPju((prev) => {
+          const isDark = prev.ldrValue > prev.thresholdLdr;
+          return {
+            ...prev,
+            pjuMode: 'AUTO',
+            kondisi: isDark ? 'GELAP' : 'TERANG',
+            pjuStatus: isDark ? 'MENYALA' : 'MATI',
+            ledMerah: isDark,
+            ledPutih: isDark,
+            jamTerakhirBeralih: nowTime,
+            siklusWaktu: isDark ? 'MALAM' : 'SIANG',
+          };
+        });
+        addEventLog('Smart PJU', 'Mode Otomatis LDR Aktif', 'Perintah CMD:PJU_AUTO dikirim (Kembali ke Sensor LDR)', 'MANUAL');
+      }
+    },
+    [sendCommand, addEventLog]
+  );
+
   const setLdrValue = useCallback((value: number) => {
     const isDark = value > 2000;
     const nowTime = new Date().toLocaleTimeString('id-ID', { hour12: false }) + ' WIB';
@@ -178,24 +265,16 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
 
   const togglePjuDayNight = useCallback(() => {
     sounds.playClick();
-    const nowTime = new Date().toLocaleTimeString('id-ID', { hour12: false }) + ' WIB';
     setPju((prev) => {
-      const isCurrentlyDark = prev.kondisi === 'GELAP';
-      const newLdr = isCurrentlyDark ? 1100 : 2850;
-      const isDark = newLdr > prev.thresholdLdr;
-      return {
-        ...prev,
-        ldrValue: newLdr,
-        kondisi: isDark ? 'GELAP' : 'TERANG',
-        pjuStatus: isDark ? 'MENYALA' : 'MATI',
-        ledMerah: isDark,
-        ledPutih: isDark,
-        jamTerakhirBeralih: nowTime,
-        siklusWaktu: isDark ? 'MALAM' : 'SIANG',
-      };
+      const isCurrentlyDark = prev.kondisi === 'GELAP' || prev.kondisi === 'MANUAL_ON';
+      if (isCurrentlyDark) {
+        controlPjuManual('OFF');
+      } else {
+        controlPjuManual('ON');
+      }
+      return prev;
     });
-    addEventLog('Smart PJU', 'Kondisi Cahaya LDR Disimulasikan', 'Uji coba manual nilai LDR diaktifkan', 'MANUAL');
-  }, [addEventLog]);
+  }, [controlPjuManual]);
 
   // ==========================================================
   // FITUR 2: SMART PENYEBERANGAN (Ultrasonik Kanan 17cm, Kiri 25cm, 5s)
@@ -209,7 +288,10 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
       const orangKanan = jarakKanan <= 17;
       const orangKiri = jarakKiri <= 25;
 
-      // Sesuai Thonny ralat: Lampu Kuning 1 detik -> Lampu Merah 5 detik + Buzzer
+      // Kirim perintah picu penyeberangan fisik ke ESP32
+      sendCommand('CMD:CROSSING_TRIGGER');
+
+      // Lampu Kuning 1 detik -> Lampu Merah 5 detik + Buzzer
       setCrossing((prev) => ({
         ...prev,
         jarakKanan,
@@ -230,7 +312,7 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
         'MANUAL'
       );
 
-      // Setelah 1 detik Kuning (WAKTU_KUNING = 1), masuk fase Merah 5s (WAKTU_MENYEBRANG = 5)
+      // Setelah 1 detik Kuning, masuk fase Merah 5s
       setTimeout(() => {
         setCrossing((prev) => ({
           ...prev,
@@ -241,11 +323,12 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
         }));
       }, 1000);
     },
-    [addEventLog]
+    [sendCommand, addEventLog]
   );
 
   const resetCrossingToSafe = useCallback(() => {
     sounds.playClick();
+    sendCommand('CMD:CROSSING_RESET');
     setCrossing((prev) => ({
       ...prev,
       jarakKanan: 35.0,
@@ -258,8 +341,19 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
       countdownSeconds: 0,
       statusRingkasan: 'AMAN',
     }));
-    addEventLog('Penyeberangan', 'Area Kosong (Reset)', 'Lampu Hijau aktif, sistem siap mendeteksi lagi', 'MANUAL');
-  }, [addEventLog]);
+    addEventLog('Penyeberangan', 'Reset Aman', 'Perintah CMD:CROSSING_RESET dikirim, Lampu Hijau aktif', 'MANUAL');
+  }, [sendCommand, addEventLog]);
+
+  const testBuzzerAlarm = useCallback(() => {
+    sounds.startPollutionAlarm();
+    setTimeout(() => {
+      if (!isPollutionAlarmActive) {
+        sounds.stopPollutionAlarm();
+      }
+    }, 4000);
+    sendCommand('CMD:ALARM_TEST');
+    addEventLog('Buzzer & Alarm', 'Uji Alarm Ninu-Ninu', 'Audio ninuninu.ogg diputar & CMD:ALARM_TEST dikirim ke ESP32 Pin 13', 'MANUAL');
+  }, [sendCommand, addEventLog, isPollutionAlarmActive]);
 
   const updateUltrasonicDistances = useCallback(
     (kanan: number, kiri: number) => {
@@ -668,6 +762,9 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
         isCameraConnected,
         setIsCameraConnected,
         updateTrafficCameraData,
+        sendCommand,
+        controlPjuManual,
+        testBuzzerAlarm,
         setLdrValue,
         togglePjuDayNight,
         triggerCrossingDetection,

@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 
 export const AirQualityView: React.FC = () => {
-  const { gas, setGasSensorValue, isHardwareConnected } = useSmartCity();
+  const { gas, setGasSensorValue, testBuzzerAlarm, isHardwareConnected } = useSmartCity();
 
   const isTinggi = gas.statusPolusi === 'POLUSI TINGGI';
   const isSedang = gas.statusPolusi === 'POLUSI SEDANG';
@@ -199,6 +199,16 @@ export const AirQualityView: React.FC = () => {
                   className="py-1.5 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium cursor-pointer transition-colors"
                 >
                   Tinggi (2100)
+                </button>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  onClick={testBuzzerAlarm}
+                  className="w-full py-2 px-3 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-xs font-medium transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Uji Alarm Buzzer Fisik (ESP32 Pin 13)</span>
                 </button>
               </div>
             </div>

@@ -19,6 +19,7 @@ export const PedestrianView: React.FC = () => {
     crossing,
     triggerCrossingDetection,
     resetCrossingToSafe,
+    testBuzzerAlarm,
     isHardwareConnected,
   } = useSmartCity();
 
@@ -232,7 +233,7 @@ export const PedestrianView: React.FC = () => {
             </div>
 
             {/* Test Trigger Buttons */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
               <button
                 onClick={() => triggerCrossingDetection('kanan')}
                 className="py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
@@ -255,6 +256,14 @@ export const PedestrianView: React.FC = () => {
               >
                 <Footprints className="w-3.5 h-3.5 text-cyan-400" />
                 <p>Uji Kedua Sisi</p>
+              </button>
+
+              <button
+                onClick={testBuzzerAlarm}
+                className="py-2 px-3 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-xs font-medium transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Volume2 className="w-3.5 h-3.5 text-indigo-400" />
+                <p>Uji Buzzer (Pin 13)</p>
               </button>
             </div>
           </div>

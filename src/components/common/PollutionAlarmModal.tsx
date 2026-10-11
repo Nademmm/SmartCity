@@ -63,9 +63,9 @@ export const PollutionAlarmModal: React.FC = () => {
           {/* Siren Status */}
           <div className="p-3 rounded-lg bg-rose-950/30 border border-rose-500/20 flex items-center justify-between">
             <div>
-              <p className="font-semibold text-rose-300">Sirine Alarm Aktif</p>
+              <p className="font-semibold text-rose-300">Sirine Alarm Aktif (Ninu-Ninu)</p>
               <p className="text-slate-400 text-[11px] mt-0.5">
-                Frekuensi audio peringatan bahaya polusi sedang diputar.
+                Audio peringatan bahaya polusi (ninuninu.ogg) sedang diputar.
               </p>
             </div>
 

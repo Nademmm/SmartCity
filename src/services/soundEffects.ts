@@ -7,6 +7,7 @@ class SoundManager {
   private sirenGain: GainNode | null = null;
   private sirenTimer: NodeJS.Timeout | null = null;
   private isSirenRunning: boolean = false;
+  private alarmAudio: HTMLAudioElement | null = null;
 
   private init() {
     if (!this.ctx && typeof window !== 'undefined') {
@@ -19,6 +20,9 @@ class SoundManager {
 
   public setMuted(muted: boolean) {
     this.isMuted = muted;
+    if (this.alarmAudio) {
+      this.alarmAudio.muted = muted;
+    }
     if (muted && this.isSirenRunning) {
       this.stopPollutionAlarm();
     }
@@ -76,9 +80,39 @@ class SoundManager {
     }, 200);
   }
 
-  // Sirine Darurat Polusi Tinggi (Two-tone Hazard Wail)
+  // Sirine Darurat Menggunakan File ninuninu.ogg
   public startPollutionAlarm() {
     if (this.isMuted || this.isSirenRunning) return;
+    this.isSirenRunning = true;
+
+    // 1. Putar audio ninuninu.ogg
+    if (typeof window !== 'undefined') {
+      try {
+        if (!this.alarmAudio) {
+          this.alarmAudio = new Audio('/sounds/ninuninu.ogg');
+          this.alarmAudio.loop = true;
+          this.alarmAudio.volume = 0.9;
+        }
+        this.alarmAudio.currentTime = 0;
+        this.alarmAudio.muted = this.isMuted;
+        const playPromise = this.alarmAudio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            console.warn('Audio ninuninu.ogg playback fallback to oscillator:', err);
+            this.startSynthesizedSiren();
+          });
+        }
+        return;
+      } catch (err) {
+        console.warn('Audio tag failed, fallback to oscillator:', err);
+      }
+    }
+
+    // 2. Fallback Web Audio Synthesizer jika Audio element gagal
+    this.startSynthesizedSiren();
+  }
+
+  private startSynthesizedSiren() {
     try {
       this.init();
       if (!this.ctx) return;
@@ -86,7 +120,6 @@ class SoundManager {
         this.ctx.resume();
       }
 
-      this.isSirenRunning = true;
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
 
@@ -103,7 +136,6 @@ class SoundManager {
       this.sirenOsc = osc;
       this.sirenGain = gain;
 
-      // Sirine naik turun berkala (Hazard Alert)
       let highTone = true;
       this.sirenTimer = setInterval(() => {
         if (!this.ctx || !this.sirenOsc) return;
@@ -120,6 +152,15 @@ class SoundManager {
     if (!this.isSirenRunning) return;
     this.isSirenRunning = false;
 
+    // Hentikan ninuninu.ogg
+    if (this.alarmAudio) {
+      try {
+        this.alarmAudio.pause();
+        this.alarmAudio.currentTime = 0;
+      } catch {}
+    }
+
+    // Hentikan oscillator fallback jika aktif
     if (this.sirenTimer) {
       clearInterval(this.sirenTimer);
       this.sirenTimer = null;
