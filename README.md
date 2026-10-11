@@ -4,22 +4,29 @@ Sistem Pusat Kendali Kota Pintar (*Autonomous Smart City Dashboard*) yang terint
 
 ---
 
-## ⚡ Akses Cepat & Integrasi IoT
+## ⚡ Akses Cepat & Dokumentasi
 
-- 📖 **[Panduan Lengkap Integrasi Hardware IoT (IOT_INTEGRATION_GUIDE.md)](./IOT_INTEGRATION_GUIDE.md)**
+- 🌟 **[PANDUAN LENGKAP MENJALANKAN PROYEK DARI AWAL (PANDUAN_MENJALANKAN_PROYEK.md)](./PANDUAN_MENJALANKAN_PROYEK.md)** : Panduan langkah demi langkah menjalankan Next.js, YOLO11 AI Traffic Camera, dan semua fiturnya.
+- 🚀 **1-Klik Jalankan Semua:** Cukup klik ganda file `start_all.bat` di root proyek.
+- 📖 **[Panduan Integrasi Hardware IoT ESP32 (IOT_INTEGRATION_GUIDE.md)](./IOT_INTEGRATION_GUIDE.md)**
 - 💻 **[Folder Firmware ESP32 Arduino (.ino)](./firmware/)**
 
 ---
 
-## 🚀 Memulai Dashboard (Development)
+## 🚀 Memulai Sistem Secara Mandiri
 
-1. Jalankan aplikasi Next.js:
-   ```bash
-   npm run dev
-   ```
-2. Buka browser pada alamat:
-   - **Local**: `http://localhost:3000`
-   - **Network (untuk ESP32 di WiFi yang sama)**: `http://<IP_LAPTOP_ANDA>:3000`
+### 1. Jalankan Dashboard Frontend (Next.js):
+```bash
+npm run dev
+```
+Buka browser pada: `http://localhost:3000`
+
+### 2. Jalankan AI Traffic Monitor (YOLO11):
+```bash
+cd traffic-monitor
+.\.venv\Scripts\python.exe main.py
+```
+Stream AI aktif di: `http://localhost:8088/video_feed`
 
 ---
 
