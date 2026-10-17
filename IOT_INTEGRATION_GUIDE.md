@@ -137,13 +137,17 @@ Sistem Next.js UrbanPulse telah dilengkapi dengan API Ingestion siap pakai:
 
 ## 5. Skema Wiring & Pinout Sensor ESP32
 
-### A. Node Sensor Kualitas Udara (MQ-135 + DHT22)
+### A. Node Sensor Kualitas Udara (MQ-135 + Monitor Hijau LCD + 2 LED)
 | Pin ESP32 | Pin Komponen | Keterangan |
 | :--- | :--- | :--- |
-| **VIN / 5V** | VCC Sensor MQ-135 & DHT22 | Sumber daya sensor |
-| **GND** | GND MQ-135 & DHT22 | Ground |
-| **GPIO 34 (Analog)** | Pin AO (Analog Out) MQ-135 | Pembacaan kadar gas |
+| **VIN / 5V** | VCC Sensor MQ-135 & VCC LCD I2C | Sumber daya 5V |
+| **GND** | GND Semua Komponen | Ground bersama |
+| **GPIO 34 / 39 (Analog)** | Pin AO (Analog Out) MQ-135 | Pembacaan kadar gas |
 | **GPIO 4 (Digital)** | Pin DATA DHT22 | Pembacaan Suhu & Kelembaban |
+| **GPIO 21 (I2C SDA)** | Pin SDA Modul LCD 16x2 I2C | Data Serial Monitor Hijau |
+| **GPIO 22 (I2C SCL)** | Pin SCL Modul LCD 16x2 I2C | Clock Serial Monitor Hijau |
+| **GPIO 18 (Digital Out)** | Anoda (+) LED Peringatan Polusi | LED Merah/Kuning (Menyala saat polusi tinggi) |
+| **GPIO 19 (Digital Out)** | Anoda (+) LED Udara Bersih | LED Hijau (Menyala saat udara bersih) |
 
 ---
 

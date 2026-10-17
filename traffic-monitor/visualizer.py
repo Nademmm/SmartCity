@@ -86,4 +86,3 @@ class Visualizer:
                     (x_panel + 10, y_panel + 90), cv2.FONT_HERSHEY_SIMPLEX, 0.35, sync_color, 1, cv2.LINE_AA)
 
         return annotated_frame
-

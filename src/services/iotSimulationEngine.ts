@@ -76,6 +76,11 @@ export const INITIAL_GAS: GasAirQualityData = {
   isAlarmActive: false,
   isAlarmMuted: false,
   lastAlarmTime: undefined,
+  ledPolusi: false,
+  ledBersih: true,
+  lcdBaris1: 'Selamat Datang',
+  lcdBaris2: 'Di Kota Pintar',
+  lcdTersedia: true,
 };
 
 export const INITIAL_DEVICES: IoTDevice[] = [

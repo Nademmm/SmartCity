@@ -57,6 +57,9 @@ try {
                     $currentLdr = $parsed.ldr
                     $currentKondisi = $parsed.kondisi
                     $currentPju = $parsed.pjuStatus
+                    $currentLedPolusi = [bool]$parsed.ledPolusi
+                    $currentLedBersih = [bool]$parsed.ledBersih
+                    $currentLcdTersedia = [bool]$parsed.lcdTersedia
                 } catch {}
             }
             # 2. Parsing teks reguler dari Thonny
@@ -107,6 +110,8 @@ try {
                         gas = @{
                             gasValue = $currentGas
                             statusPolusi = $currentStatusPolusi
+                            ledPolusi = $currentLedPolusi
+                            ledBersih = $currentLedBersih
                         }
                         crossing = @{
                             jarakKanan = $currentJarakKanan

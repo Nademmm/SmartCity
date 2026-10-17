@@ -411,6 +411,8 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
       }
 
       const nowTime = new Date().toLocaleTimeString('id-ID', { hour12: false }) + ' WIB';
+      const isHigh = value >= 1500;
+      const isMed = value >= 1000 && value < 1500;
 
       setGas((prev) => ({
         ...prev,
@@ -418,6 +420,11 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
         statusPolusi,
         isAlarmActive: statusPolusi === 'POLUSI TINGGI',
         lastAlarmTime: statusPolusi === 'POLUSI TINGGI' ? nowTime : prev.lastAlarmTime,
+        ledPolusi: isHigh || isMed,
+        ledBersih: !isHigh,
+        lcdBaris1: isHigh ? 'STATUS: BAHAYA!' : isMed ? 'STATUS: WASPADA' : 'Selamat Datang',
+        lcdBaris2: isHigh ? 'Polusi: TINGGI' : isMed ? `Gas: ${value} Sedang` : 'Di Kota Pintar',
+        lcdTersedia: true,
       }));
 
       if (value >= 1500) {
@@ -676,12 +683,20 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
 
           const nowTime = new Date().toLocaleTimeString('id-ID', { hour12: false }) + ' WIB';
 
+          const isHigh = statusPolusi === 'POLUSI TINGGI';
+          const isMed = statusPolusi === 'POLUSI SEDANG';
+
           setGas((prev) => ({
             ...prev,
             gasValue: val,
             statusPolusi: g.statusPolusi ?? g.status ?? statusPolusi,
             isAlarmActive: statusPolusi === 'POLUSI TINGGI',
             lastAlarmTime: statusPolusi === 'POLUSI TINGGI' ? nowTime : prev.lastAlarmTime,
+            ledPolusi: g.ledPolusi !== undefined ? g.ledPolusi : (isHigh || isMed),
+            ledBersih: g.ledBersih !== undefined ? g.ledBersih : !isHigh,
+            lcdBaris1: g.lcdBaris1 ?? (isHigh ? 'STATUS: BAHAYA!' : isMed ? 'STATUS: WASPADA' : 'Selamat Datang'),
+            lcdBaris2: g.lcdBaris2 ?? (isHigh ? 'Polusi: TINGGI' : isMed ? `Gas: ${val} Sedang` : 'Di Kota Pintar'),
+            lcdTersedia: g.lcdTersedia ?? true,
           }));
 
           if (statusPolusi === 'POLUSI TINGGI') {

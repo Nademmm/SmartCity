@@ -220,25 +220,110 @@ export const AirQualityView: React.FC = () => {
           </div>
         </div>
 
-        {/* Live Terminal Console */}
-        <div className="lg:col-span-6 flex flex-col justify-between">
+        {/* Live Terminal & Hardware Display (Monitor Hijau & 2 LED) */}
+        <div className="lg:col-span-6 flex flex-col gap-4">
+          {/* [REVISI] Kartu Monitor Hijau (LCD 16x2 I2C) & 2 LED Tambahan */}
+          <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800/80 space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
+              <div className="flex items-center gap-2">
+                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                <h3 className="text-xs font-semibold text-white uppercase tracking-wider">
+                  Hardware Output: Monitor Hijau & 2 LED
+                </h3>
+              </div>
+              <span className="text-[11px] font-mono text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/50">
+                I2C: Pin 21 (SDA) / 22 (SCL)
+              </span>
+            </div>
+
+            {/* Simulasi Layar LCD 16x2 Green Backlight */}
+            <div className="p-3.5 rounded-lg bg-emerald-950/80 border-2 border-emerald-700/60 shadow-inner flex flex-col justify-center relative overflow-hidden">
+              <div className="absolute top-1 right-2 text-[9px] font-mono text-emerald-400/70 tracking-widest uppercase">
+                LCD 1602 I2C (0x27)
+              </div>
+              <div className="font-mono text-sm sm:text-base font-black text-emerald-300 tracking-wider select-none bg-emerald-900/40 p-2.5 rounded border border-emerald-800/40 shadow-sm space-y-1">
+                <p className="truncate">
+                  {gas.lcdBaris1 || (isTinggi ? 'STATUS: BAHAYA!' : isSedang ? 'STATUS: WASPADA' : 'Selamat Datang')}
+                </p>
+                <p className="truncate">
+                  {gas.lcdBaris2 || (isTinggi ? 'Polusi: TINGGI' : isSedang ? `Gas: ${gas.gasValue} Sedang` : 'Di Kota Pintar')}
+                </p>
+              </div>
+            </div>
+
+            {/* Status 2 LED Tambahan Fisik */}
+            <div className="grid grid-cols-2 gap-2.5 pt-1">
+              {/* LED 1: Peringatan Polusi (Pin 18) */}
+              <div
+                className={`p-2.5 rounded-lg border transition-all flex items-center justify-between ${
+                  gas.ledPolusi || isTinggi
+                    ? 'bg-rose-950/40 border-rose-500/60 text-rose-200 shadow-sm shadow-rose-950'
+                    : 'bg-slate-950/60 border-slate-800 text-slate-500'
+                }`}
+              >
+                <div className="space-y-0.5">
+                  <p className="text-[11px] font-semibold">LED Peringatan</p>
+                  <p className="text-[10px] font-mono opacity-80">GPIO Pin 18</p>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div
+                    className={`w-3.5 h-3.5 rounded-full border ${
+                      gas.ledPolusi || isTinggi
+                        ? 'bg-rose-500 border-rose-300 shadow-[0_0_8px_#f43f5e]'
+                        : 'bg-slate-800 border-slate-700'
+                    }`}
+                  />
+                  <span className="text-[10px] font-mono font-bold">
+                    {gas.ledPolusi || isTinggi ? 'ON' : 'OFF'}
+                  </span>
+                </div>
+              </div>
+
+              {/* LED 2: Udara Bersih (Pin 19) */}
+              <div
+                className={`p-2.5 rounded-lg border transition-all flex items-center justify-between ${
+                  gas.ledBersih !== false && !isTinggi
+                    ? 'bg-emerald-950/40 border-emerald-500/60 text-emerald-200 shadow-sm shadow-emerald-950'
+                    : 'bg-slate-950/60 border-slate-800 text-slate-500'
+                }`}
+              >
+                <div className="space-y-0.5">
+                  <p className="text-[11px] font-semibold">LED Udara Bersih</p>
+                  <p className="text-[10px] font-mono opacity-80">GPIO Pin 19</p>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div
+                    className={`w-3.5 h-3.5 rounded-full border ${
+                      gas.ledBersih !== false && !isTinggi
+                        ? 'bg-emerald-500 border-emerald-300 shadow-[0_0_8px_#10b981]'
+                        : 'bg-slate-800 border-slate-700'
+                    }`}
+                  />
+                  <span className="text-[10px] font-mono font-bold">
+                    {gas.ledBersih !== false && !isTinggi ? 'ON' : 'OFF'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <TerminalConsole
             filterFeature="polusi"
             title="Serial Output (Sensor Gas / MQ)"
-            maxHeight="max-h-[380px]"
+            maxHeight="max-h-[260px]"
           />
 
-          <div className="mt-3 p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/80 flex items-center justify-between text-xs">
+          <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 flex items-center justify-between text-xs">
             <div className="flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <p className="text-white font-medium">Spesifikasi Hardware:</p>
+              <p className="text-white font-medium">Hardware IoT Mesh:</p>
             </div>
             <div className="flex items-center gap-2 font-mono text-slate-400 text-[11px]">
-              <p>MQ Gas</p>
+              <p>MQ-135</p>
               <p>•</p>
-              <p>Pin ADC 39</p>
+              <p>LCD 1602 I2C</p>
               <p>•</p>
-              <p>Atten 11dB</p>
+              <p>2x LED (18/19)</p>
             </div>
           </div>
         </div>

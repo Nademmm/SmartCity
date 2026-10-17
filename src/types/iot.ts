@@ -82,6 +82,11 @@ export interface GasAirQualityData {
   isAlarmActive?: boolean;
   isAlarmMuted?: boolean;
   lastAlarmTime?: string;
+  ledPolusi?: boolean; // Pin 18 (Peringatan Polusi)
+  ledBersih?: boolean; // Pin 19 (Udara Bersih)
+  lcdBaris1?: string;  // Teks baris 1 monitor hijau LCD 16x2
+  lcdBaris2?: string;  // Teks baris 2 monitor hijau LCD 16x2
+  lcdTersedia?: boolean;
 }
 
 export type DeviceType = 
