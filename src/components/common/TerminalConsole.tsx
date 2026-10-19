@@ -25,6 +25,7 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
   const [customCommand, setCustomCommand] = useState('');
 
   const bottomRef = useRef<HTMLDivElement>(null);
+  const consoleContainerRef = useRef<HTMLDivElement>(null);
   const portRef = useRef<any>(null);
   const writerRef = useRef<any>(null);
   const keepReadingRef = useRef<boolean>(true);
@@ -238,8 +239,8 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
   }, [isHardwareConnected, isSerialConnected, gas.gasValue, crossing.lampu, crossing.countdownSeconds, pju.ldrValue, filterFeature]);
 
   useEffect(() => {
-    if (autoScroll && bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (autoScroll && consoleContainerRef.current) {
+      consoleContainerRef.current.scrollTop = consoleContainerRef.current.scrollHeight;
     }
   }, [logs, autoScroll]);
 
@@ -319,7 +320,10 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
       </div>
 
       {/* Terminal Content */}
-      <div className={`p-3.5 font-mono text-[11px] leading-relaxed overflow-y-auto select-text ${maxHeight} text-slate-300 space-y-0.5`}>
+      <div 
+        ref={consoleContainerRef}
+        className={`p-3.5 font-mono text-[11px] leading-relaxed overflow-y-auto select-text ${maxHeight} text-slate-300 space-y-0.5`}
+      >
         {logs.length === 0 ? (
           <p className="text-slate-500 italic py-2">Tidak ada log.</p>
         ) : (

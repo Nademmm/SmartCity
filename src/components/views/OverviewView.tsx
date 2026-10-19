@@ -3,7 +3,6 @@
 import React from 'react';
 import { useSmartCity } from '@/context/SmartCityContext';
 import { MetricCard } from '@/components/common/MetricCard';
-import { TerminalConsole } from '@/components/common/TerminalConsole';
 import {
   Navigation,
   Wind,
@@ -15,6 +14,10 @@ import {
   Moon,
   Clock,
   ArrowRight,
+  Terminal,
+  CheckCircle2,
+  Activity,
+  Zap,
 } from 'lucide-react';
 
 export const OverviewView: React.FC = () => {
@@ -28,6 +31,7 @@ export const OverviewView: React.FC = () => {
     setActiveSubsystem,
     togglePjuDayNight,
     triggerCrossingDetection,
+    lastTelemetryTimestamp,
   } = useSmartCity();
 
   const isGelap = pju.kondisi === 'GELAP';
@@ -40,16 +44,16 @@ export const OverviewView: React.FC = () => {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${isHardwareConnected ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+              <div className={`w-2 h-2 rounded-full ${isHardwareConnected ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
               <h2 className="text-sm font-semibold text-white">
                 {isHardwareConnected ? 'ESP32 Miniatur Aktif' : 'ESP32 Miniatur Standby'}
               </h2>
-              <div className="text-[11px] text-slate-400 font-mono">MicroPython Core</div>
+              <div className="text-[11px] text-slate-400 font-mono">MicroPython Core (COM3)</div>
             </div>
             <p className="text-xs text-slate-400">
               {isHardwareConnected
                 ? 'Telemetri mengalir secara real-time dari mikrokontroler ESP32.'
-                : 'Menunggu koneksi board. Hubungkan kabel USB dan jalankan script di Thonny.'}
+                : 'Menunggu koneksi board. Hubungkan kabel USB dan jalankan bridge serial.'}
             </p>
           </div>
 
@@ -122,7 +126,7 @@ export const OverviewView: React.FC = () => {
         />
       </div>
 
-      {/* Schematic Layout & Live Serial Terminal */}
+      {/* Schematic Layout & Hardware Status Panel */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         {/* Left: Schematic Layout of Miniature Smart City */}
         <div className="lg:col-span-7 rounded-xl bg-slate-900/60 border border-slate-800/80 p-4 flex flex-col justify-between">
@@ -236,13 +240,91 @@ export const OverviewView: React.FC = () => {
           </div>
         </div>
 
-        {/* Right Side: Serial Terminal Console */}
-        <div className="lg:col-span-5 flex flex-col justify-between">
-          <TerminalConsole
-            filterFeature="all"
-            title="Thonny Serial Output"
-            maxHeight="max-h-[440px]"
-          />
+        {/* Right Side: Centralized Telemetry and Link to Unified Terminal */}
+        <div className="lg:col-span-5 rounded-xl bg-slate-900/60 border border-slate-800/80 p-4 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
+              <div className="flex items-center gap-2">
+                <Cpu className="w-4 h-4 text-cyan-400" />
+                <h3 className="text-xs font-semibold text-white uppercase tracking-wider">
+                  Status Telemetri & Aktuator
+                </h3>
+              </div>
+              <span className="font-mono text-[11px] text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                COM3 115200
+              </span>
+            </div>
+
+            <div className="my-3 space-y-2.5 text-xs">
+              {/* Telemetry Status Item 1: LCD & Gas */}
+              <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-800/80 flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-white">Monitor Hijau (LCD 1602 I2C)</p>
+                  <p className="text-[11px] text-slate-400 font-mono">
+                    Baris 1: &quot;{gas.lcdBaris1 || 'Selamat Datang'}&quot;
+                  </p>
+                </div>
+                <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  0x27 Aktif
+                </span>
+              </div>
+
+              {/* Telemetry Status Item 2: PJU Lighting */}
+              <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-800/80 flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-white">Penerangan Jalan (LED 25 & 26)</p>
+                  <p className="text-[11px] text-slate-400 font-mono">
+                    Mode: {pju.pjuMode || 'AUTO'} • Status: {pju.pjuStatus}
+                  </p>
+                </div>
+                <span
+                  className={`text-[10px] font-mono font-medium px-2 py-0.5 rounded border ${
+                    pju.ledPutih || pju.ledMerah
+                      ? 'bg-amber-500/10 text-amber-300 border-amber-500/20'
+                      : 'bg-slate-800 text-slate-400 border-slate-700'
+                  }`}
+                >
+                  {pju.pjuStatus}
+                </span>
+              </div>
+
+              {/* Telemetry Status Item 3: Crossing & Buzzer */}
+              <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-800/80 flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-white">Lampu Lalin & Buzzer (Pin 13)</p>
+                  <p className="text-[11px] text-slate-400 font-mono">
+                    Lampu {crossing.lampu} • Buzzer: {crossing.buzzer ? 'BUNYI' : 'STANDBY'}
+                  </p>
+                </div>
+                <span
+                  className={`text-[10px] font-mono font-medium px-2 py-0.5 rounded border ${
+                    crossing.lampu === 'MERAH'
+                      ? 'bg-rose-500/10 text-rose-300 border-rose-500/20'
+                      : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                  }`}
+                >
+                  {crossing.lampu}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Quick link button to dedicated Terminal in Notifikasi & Log */}
+          <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-mono">
+              <Activity className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Log terpusat di Notifikasi</span>
+            </div>
+
+            <button
+              onClick={() => setActiveSubsystem('alerts')}
+              className="px-3 py-1.5 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/30 flex items-center gap-1.5 text-xs font-medium cursor-pointer transition-colors"
+            >
+              <Terminal className="w-3.5 h-3.5" />
+              <span>Buka Terminal Serial</span>
+              <ArrowRight className="w-3 h-3" />
+            </button>
+          </div>
         </div>
       </div>
     </div>

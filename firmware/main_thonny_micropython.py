@@ -1,52 +1,59 @@
-# ==========================================================
-# URBANPULSE - SMART CITY MONITORING & BIDIRECTIONAL CONTROL
-# FIRMWARE MICROPYTHON (ESP32)
-#
-# FITUR UTAMA + KONTROL DASHBOARD:
-# 1. Monitoring Polusi Udara  -> Sensor Gas/MQ (Pin 39)
-# 2. Smart Penyeberangan      -> 2 Sensor Ultrasonik (Pin 32/34 & 33/35)
-#                                + LED Hijau (12), Kuning (14), Merah (27), Buzzer (13)
-# 3. Smart PJU Otomatis/Manual-> Sensor LDR (Pin 36) + LED Merah (25) & LED Putih (26)
-# 4. [BARU - REVISI] Monitor Hijau LCD 16x2 I2C (SDA Pin 21, SCL Pin 22)
-#    - Menampilkan ucapan: "Selamat Datang Di Kota Pintar"
-#    - Berubah otomatis saat polusi naik: "STATUS: BAHAYA! Polusi: TINGGI"
-# 5. [BARU - REVISI] 2 LED Tambahan:
-#    - LED Peringatan Polusi (Pin 18) -> Menyala saat polusi tinggi
-#    - LED Udara Bersih / Status Aman (Pin 19) -> Menyala saat udara bersih
-# ==========================================================
-
 from machine import Pin, ADC, I2C, time_pulse_us
 import time
 import sys
 import uselect
-
-# Setup listener serial non-blocking untuk menerima perintah dari Dashboard
-spoll = uselect.poll()
-spoll.register(sys.stdin, uselect.POLLIN)
-
-# Optional WiFi Telemetry ke Dashboard Next.js
-ENABLE_WIFI_TELEMETRY = False
-WIFI_SSID = "NAMA_WIFI_KAMU"
-WIFI_PASSWORD = "PASSWORD_WIFI"
-DASHBOARD_API_URL = "http://192.168.1.100:3000/api/iot/telemetry"
-
-if ENABLE_WIFI_TELEMETRY:
-    import network
-    import urequests
-    import ujson
-    wlan = network.WLAN(network.STA_IF)
-    wlan.active(True)
-    if not wlan.isconnected():
-        wlan.connect(WIFI_SSID, WIFI_PASSWORD)
+from i2c_lcd import I2cLcd
 
 # ==================================================
-# 1. SENSOR GAS (MQ Pin 39)
+# 1. LCD I2C (Otomatis Mendeteksi Pin SCL & SDA)
+# ==================================================
+i2c = None
+alamat_lcd = []
+
+for scl_p, sda_p in [(22, 21), (21, 22)]:
+    try:
+        temp_i2c = I2C(0, scl=Pin(scl_p), sda=Pin(sda_p), freq=100000)
+        scan_res = temp_i2c.scan()
+        if len(scan_res) > 0:
+            i2c = temp_i2c
+            alamat_lcd = scan_res
+            print(f"Alamat I2C terdeteksi (SCL={scl_p}, SDA={sda_p}):", [hex(x) for x in alamat_lcd])
+            break
+    except Exception:
+        pass
+
+if i2c is None:
+    i2c = I2C(0, scl=Pin(21), sda=Pin(22), freq=100000)
+    alamat_lcd = i2c.scan()
+    print("Alamat I2C:", alamat_lcd)
+
+lcd = None
+if len(alamat_lcd) > 0:
+    try:
+        lcd = I2cLcd(i2c, alamat_lcd[0], 2, 16)
+        lcd.clear()
+        lcd.move_to(0, 0)
+        lcd.putstr("URBANPULSE")
+        lcd.move_to(0, 1)
+        lcd.putstr("Monitoring Gas")
+        time.sleep(2)
+        lcd.clear()
+        print("[LCD] Berhasil terhubung dan teks ditampilkan!")
+    except Exception as e:
+        lcd = None
+        print("LCD bermasalah:", e)
+else:
+    print("LCD tidak terdeteksi!")
+
+# ==================================================
+# 2. SENSOR GAS MQ
 # ==================================================
 sensor_gas = ADC(Pin(39))
 sensor_gas.atten(ADC.ATTN_11DB)
+BATAS_GAS = 1500
 
 # ==================================================
-# 2. SENSOR ULTRASONIK
+# 3. SENSOR ULTRASONIK
 # ==================================================
 TRIG_KANAN = Pin(32, Pin.OUT)
 ECHO_KANAN = Pin(34, Pin.IN)
@@ -54,163 +61,168 @@ ECHO_KANAN = Pin(34, Pin.IN)
 TRIG_KIRI = Pin(33, Pin.OUT)
 ECHO_KIRI = Pin(35, Pin.IN)
 
+TRIG_KANAN.off()
+TRIG_KIRI.off()
+
 # ==================================================
-# 3. SENSOR LDR (Pin 36)
+# 4. SENSOR LDR
 # ==================================================
 ldr = ADC(Pin(36))
 ldr.atten(ADC.ATTN_11DB)
 THRESHOLD_LDR = 2000
 
 # ==================================================
-# 4. LED DAN BUZZER (LAMA)
+# 5. LED DAN BUZZER
 # ==================================================
-led_merah = Pin(25, Pin.OUT)  # PJU Merah
-led_putih = Pin(26, Pin.OUT)  # PJU Putih
+led_merah = Pin(25, Pin.OUT)  # PJU
+led_putih = Pin(26, Pin.OUT)  # PJU
 
-led_hijau = Pin(12, Pin.OUT)              # Traffic Hijau
-led_kuning = Pin(14, Pin.OUT)             # Traffic Kuning
-led_merah_penyeberangan = Pin(27, Pin.OUT)# Traffic Merah
+led_hijau = Pin(12, Pin.OUT)
+led_kuning = Pin(14, Pin.OUT)
+led_merah_penyeberangan = Pin(27, Pin.OUT)
 
-buzzer = Pin(13, Pin.OUT)                 # Buzzer Penyeberangan & Alarm
+buzzer = Pin(4, Pin.OUT)
 
-# ==================================================
-# 5. [BARU - REVISI] 2 LED INDIKATOR TAMBAHAN
-# ==================================================
-led_polusi_warning = Pin(18, Pin.OUT)     # LED Peringatan Polusi Naik (Merah/Kuning)
-led_udara_bersih   = Pin(19, Pin.OUT)     # LED Status Udara Bersih / Aman (Hijau)
-
-# ==================================================
-# 6. [BARU - REVISI] DRIVER LCD 16X2 I2C (MONITOR HIJAU)
-# ==================================================
-class I2cLcd1602:
-    """Driver LCD 1602 I2C berbasis PCF8574 mandiri dan ringan"""
-    def __init__(self, i2c_bus, addr, lines=2, cols=16):
-        self.i2c = i2c_bus
-        self.addr = addr
-        self.lines = lines
-        self.cols = cols
-        self.backlight = 0x08
-        time.sleep_ms(50)
-        self._write_nibble(0x30)
-        time.sleep_ms(5)
-        self._write_nibble(0x30)
-        time.sleep_us(150)
-        self._write_nibble(0x30)
-        self._write_nibble(0x20)
-        self.cmd(0x28)
-        self.cmd(0x0C)
-        self.cmd(0x06)
-        self.clear()
-
-    def _write_nibble(self, nibble):
-        byte = (nibble & 0xF0) | self.backlight
-        self.i2c.writeto(self.addr, bytes([byte | 0x04]))
-        time.sleep_us(1)
-        self.i2c.writeto(self.addr, bytes([byte & ~0x04]))
-        time.sleep_us(50)
-
-    def cmd(self, c):
-        self._write_nibble(c & 0xF0)
-        self._write_nibble((c << 4) & 0xF0)
-
-    def char(self, ch):
-        val = ord(ch) if isinstance(ch, str) else ch
-        byte1 = (val & 0xF0) | self.backlight | 0x01
-        self.i2c.writeto(self.addr, bytes([byte1 | 0x04]))
-        time.sleep_us(1)
-        self.i2c.writeto(self.addr, bytes([byte1 & ~0x04]))
-        time.sleep_us(50)
-        byte2 = ((val << 4) & 0xF0) | self.backlight | 0x01
-        self.i2c.writeto(self.addr, bytes([byte2 | 0x04]))
-        time.sleep_us(1)
-        self.i2c.writeto(self.addr, bytes([byte2 & ~0x04]))
-        time.sleep_us(50)
-
-    def clear(self):
-        self.cmd(0x01)
-        time.sleep_ms(2)
-
-    def move_to(self, col, row):
-        addr = col & 0x3F
-        if row == 1:
-            addr += 0x40
-        self.cmd(0x80 | addr)
-
-    def print_text(self, text):
-        for ch in text:
-            self.char(ch)
-
-# Inisialisasi Hardware I2C (Pin 21 SDA, Pin 22 SCL)
-lcd_device = None
-lcd_tersedia = False
-
+# LED Indikator Gas / Kualitas Udara
 try:
-    i2c_bus = I2C(0, scl=Pin(22), sda=Pin(21), freq=100000)
-    devices = i2c_bus.scan()
-    print("[I2C SCAN] Perangkat terdeteksi di alamat:", [hex(d) for d in devices])
-
-    target_addr = None
-    for addr in [0x27, 0x3F, 0x20, 0x38]:
-        if addr in devices:
-            target_addr = addr
-            break
-    if target_addr is None and len(devices) > 0:
-        target_addr = devices[0]
-
-    if target_addr is not None:
-        lcd_device = I2cLcd1602(i2c_bus, target_addr)
-        lcd_tersedia = True
-        print("[LCD] Monitor Hijau Terhubung pada alamat:", hex(target_addr))
-    else:
-        print("[LCD] Perhatian: LCD belum terdeteksi. Program tetap berjalan normal.")
-except Exception as e:
-    print("[LCD WARN] Gagal inisialisasi I2C LCD:", e)
-    lcd_tersedia = False
-
-# Cache tampilan LCD agar tidak flicker
-cache_line1 = ""
-cache_line2 = ""
-
-def update_monitor_lcd(baris1, baris2):
-    """Memperbarui teks pada Monitor Hijau 16x2 hanya jika teks berubah"""
-    global cache_line1, cache_line2, lcd_tersedia
-    if not lcd_tersedia or lcd_device is None:
-        return
-    try:
-        # Padded tepat 16 karakter agar menghapus sisa karakter lama
-        b1 = (baris1[:16] + " " * 16)[:16]
-        b2 = (baris2[:16] + " " * 16)[:16]
-
-        if b1 != cache_line1:
-            lcd_device.move_to(0, 0)
-            lcd_device.print_text(b1)
-            cache_line1 = b1
-
-        if b2 != cache_line2:
-            lcd_device.move_to(0, 1)
-            lcd_device.print_text(b2)
-            cache_line2 = b2
-    except Exception as e:
-        print("[LCD ERR]", e)
-        lcd_tersedia = False
+    led_polusi_gas = Pin(18, Pin.OUT)
+    led_bersih_gas = Pin(19, Pin.OUT)
+    led_polusi_gas.off()
+    led_bersih_gas.on()
+except Exception:
+    led_polusi_gas = None
+    led_bersih_gas = None
 
 # ==================================================
-# 7. PENGATURAN & VARIABEL STATUS KONTROL
+# 6. PENGATURAN & KONTROL JARINGAN
 # ==================================================
 BATAS_KANAN = 17
 BATAS_KIRI = 25
-WAKTU_KUNING = 1
-WAKTU_MENYEBRANG = 5
 
-# Mode PJU: "AUTO" (Sensor LDR), "ON" (Manual Nyala), "OFF" (Manual Mati)
-pju_mode = "AUTO"
+WAKTU_KUNING = 1000       # 1 detik
+WAKTU_MENYEBRANG = 5000   # 5 detik
 
-# Status penyeberangan
 siap_menyeberang = True
-force_crossing_trigger = False
-force_crossing_reset = False
+fase_penyeberangan = "HIJAU"
+waktu_fase = time.ticks_ms()
 
-# Kondisi awal aktuator
+pju_manual_mode = "AUTO"  # "AUTO", "ON", atau "OFF"
+gas_override_mode = "AUTO"  # "AUTO" atau "MANUAL"
+nilai_gas_manual = 650
+
+# Listener serial non-blocking untuk kendali dari Dashboard Web
+spoll = uselect.poll()
+spoll.register(sys.stdin, uselect.POLLIN)
+
+def cek_perintah_jaringan():
+    global siap_menyeberang, fase_penyeberangan, waktu_fase, pju_manual_mode, gas_override_mode, nilai_gas_manual
+    if spoll.poll(0):
+        try:
+            line = sys.stdin.readline().strip()
+            if not line:
+                return
+
+            print(">>> PERINTAH DITERIMA:", line)
+
+            # 1. KONTROL SMART PJU
+            if line == "CMD:PJU_ON":
+                pju_manual_mode = "ON"
+                led_merah.on()
+                led_putih.on()
+                print(">>> STATUS PJU: MANUAL ON (DIKENDALIKAN WEB)")
+
+            elif line == "CMD:PJU_OFF":
+                pju_manual_mode = "OFF"
+                led_merah.off()
+                led_putih.off()
+                print(">>> STATUS PJU: MANUAL OFF (DIKENDALIKAN WEB)")
+
+            elif line == "CMD:PJU_AUTO":
+                pju_manual_mode = "AUTO"
+                print(">>> STATUS PJU: OTOMATIS SENSOR LDR")
+
+            # 2. KONTROL PENYEBERANGAN (PELICAN CROSSING)
+            elif line in ["CMD:FORCE_CROSSING", "CMD:CROSSING_TRIGGER"]:
+                if fase_penyeberangan == "HIJAU":
+                    siap_menyeberang = False
+                    fase_penyeberangan = "KUNING"
+                    waktu_fase = time.ticks_ms()
+                    print(">>> PENYEBERANGAN DIPAKSA AKTIF DARI WEB!")
+
+            elif line == "CMD:CROSSING_RESET":
+                fase_penyeberangan = "HIJAU"
+                siap_menyeberang = True
+                waktu_fase = time.ticks_ms()
+                led_hijau.on()
+                led_kuning.off()
+                led_merah_penyeberangan.off()
+                buzzer.off()
+                print(">>> PENYEBERANGAN DIRESET AMAN (HIJAU)")
+
+            # 3. KONTROL BUZZER
+            elif line in ["CMD:BUZZER_TEST", "CMD:ALARM_TEST"]:
+                buzzer.on()
+                time.sleep_ms(350)
+                buzzer.off()
+                print(">>> UJI BUZZER SUKSES")
+
+            elif line == "CMD:BUZZER_MUTE":
+                buzzer.off()
+                print(">>> BUZZER DIBISUKAN")
+
+            # 4. KONTROL SENSOR GAS & SIMULASI POLUSI DARI DEVICE
+            elif line == "CMD:GAS_AUTO":
+                gas_override_mode = "AUTO"
+                print(">>> STATUS GAS: MODE OTOMATIS SENSOR FISIK PIN 39")
+
+            elif line == "CMD:GAS_BERSIH":
+                gas_override_mode = "MANUAL"
+                nilai_gas_manual = 650
+                buzzer.off()
+                print(">>> STATUS GAS: MANUAL UDARA BERSIH (650)")
+
+            elif line == "CMD:GAS_SEDANG":
+                gas_override_mode = "MANUAL"
+                nilai_gas_manual = 1250
+                buzzer.off()
+                print(">>> STATUS GAS: MANUAL POLUSI SEDANG (1250)")
+
+            elif line in ["CMD:GAS_TINGGI", "CMD:GAS_BAHAYA"]:
+                gas_override_mode = "MANUAL"
+                nilai_gas_manual = 2100
+                print(">>> STATUS GAS: MANUAL POLUSI TINGGI (2100)")
+
+            elif line.startswith("CMD:GAS_SET:"):
+                try:
+                    val_str = line.split(":")[2]
+                    nilai_gas_manual = int(val_str)
+                    gas_override_mode = "MANUAL"
+                    print(">>> STATUS GAS: MANUAL DITETAPKAN KE", nilai_gas_manual)
+                except Exception as ex:
+                    print("[ERR_GAS_SET]", ex)
+
+        except Exception as err:
+            print("[ERR_CMD]", err)
+
+# Pengaturan pola buzzer
+INTERVAL_GAS = 800
+WAKTU_GANTI_MODE = 2500
+
+POLA_SEBERANG = [
+    (150, 100),
+    (150, 100),
+    (150, 350),
+    (150, 100),
+    (150, 100),
+    (150, 350),
+]
+
+jenis_alarm_sebelumnya = "none"
+waktu_awal_alarm = time.ticks_ms()
+
+# ==================================================
+# 7. KONDISI AWAL
+# ==================================================
 led_hijau.on()
 led_kuning.off()
 led_merah_penyeberangan.off()
@@ -218,352 +230,300 @@ buzzer.off()
 led_merah.off()
 led_putih.off()
 
-# Kondisi awal 2 LED Baru
-led_polusi_warning.off()
-led_udara_bersih.on()
-
-# Tampilkan ucapan sambutan pertama kali pada Monitor Hijau
-update_monitor_lcd("Selamat Datang", "Di Kota Pintar")
-
 # ==================================================
-# 8. FUNGSI PEMBACAAN SERIAL DARI DASHBOARD (NON-BLOCKING)
-# ==================================================
-def cek_perintah_serial():
-    global pju_mode, force_crossing_trigger, force_crossing_reset
-    while spoll.poll(0):
-        try:
-            raw_line = sys.stdin.readline()
-            if not raw_line:
-                break
-            cmd = raw_line.strip()
-            if not cmd:
-                continue
-
-            print("[ACK] Perintah Diterima:", cmd)
-
-            # 1. KONTROL PJU (LED Pin 25 & 26)
-            if cmd == "CMD:PJU_ON":
-                pju_mode = "ON"
-                led_merah.on()
-                led_putih.on()
-                print(">>> KONTROL PJU: MANUAL ON (LED Merah 25 & Putih 26 MENYALA)")
-
-            elif cmd == "CMD:PJU_OFF":
-                pju_mode = "OFF"
-                led_merah.off()
-                led_putih.off()
-                print(">>> KONTROL PJU: MANUAL OFF (LED Merah 25 & Putih 26 MATI)")
-
-            elif cmd == "CMD:PJU_AUTO":
-                pju_mode = "AUTO"
-                print(">>> KONTROL PJU: MODE OTOMATIS (SENSOR LDR)")
-
-            # 2. KONTROL PENYEBERANGAN (LAMPU & BUZZER)
-            elif cmd == "CMD:CROSSING_TRIGGER":
-                force_crossing_trigger = True
-                print(">>> KONTROL PENYEBERANGAN: DIPICU DARI DASHBOARD!")
-
-            elif cmd == "CMD:CROSSING_RESET":
-                force_crossing_reset = True
-                siap_menyeberang = True
-                led_merah_penyeberangan.off()
-                led_kuning.off()
-                led_hijau.on()
-                buzzer.off()
-                print(">>> KONTROL PENYEBERANGAN: DIRESET KE STATUS AMAN (HIJAU)")
-
-            # 3. KONTROL BUZZER & ALARM
-            elif cmd == "CMD:BUZZER_ON":
-                buzzer.on()
-                print(">>> KONTROL BUZZER: PIN 13 HIGH")
-
-            elif cmd == "CMD:BUZZER_OFF":
-                buzzer.off()
-                print(">>> KONTROL BUZZER: PIN 13 LOW")
-
-            elif cmd == "CMD:ALARM_TEST":
-                print(">>> KONTROL ALARM: UJI POLA NADA BUZZER")
-                for _ in range(3):
-                    buzzer.on()
-                    time.sleep_ms(150)
-                    buzzer.off()
-                    time.sleep_ms(100)
-
-            # 4. UJI 2 LED TAMBAHAN
-            elif cmd == "CMD:TEST_NEW_LEDS":
-                print(">>> UJI 2 LED TAMBAHAN (Pin 18 & 19)")
-                led_polusi_warning.on()
-                led_udara_bersih.on()
-                time.sleep_ms(500)
-                led_polusi_warning.off()
-                led_udara_bersih.off()
-                time.sleep_ms(300)
-
-        except Exception as e:
-            print("[ERR_SERIAL]", e)
-
-# ==================================================
-# 9. MEMBACA JARAK SENSOR ULTRASONIK
+# 8. MEMBACA JARAK ULTRASONIK
 # ==================================================
 def baca_jarak(TRIG, ECHO):
     TRIG.off()
     time.sleep_us(5)
-
     TRIG.on()
     time.sleep_us(10)
     TRIG.off()
 
     try:
         durasi = time_pulse_us(ECHO, 1, 30000)
+
         if durasi <= 0:
             return None
+
         jarak = (durasi * 0.0343) / 2
+
         if jarak < 2 or jarak > 400:
             return None
+
         return jarak
     except Exception:
         return None
 
+# ==================================================
+# 9. FILTER PEMBACAAN JARAK
+# ==================================================
 def baca_jarak_stabil(TRIG, ECHO):
     hasil = []
+
     for i in range(3):
-        cek_perintah_serial()
         jarak = baca_jarak(TRIG, ECHO)
+
         if jarak is not None:
             hasil.append(jarak)
+
         if i < 2:
-            time.sleep_ms(60)
-    if len(hasil) < 2:
+            time.sleep_ms(40)
+
+    if len(hasil) == 0:
         return None
+
     hasil.sort()
+
+    if len(hasil) == 1:
+        return hasil[0]
+
     return hasil[len(hasil) // 2]
 
 # ==================================================
-# 10. PROGRAM UTAMA
+# 10. BUZZER DUA FUNGSI
 # ==================================================
-print("\n================================")
-print(" URBANPULSE SMART CITY (ESP32)  ")
-print(" KONTROL SERIAL DUA ARAH AKTIF  ")
-print(" MONITOR HIJAU & 2 LED AKTIF    ")
-print("================================")
+def update_buzzer(alarm_gas, alarm_seberang):
+    global jenis_alarm_sebelumnya, waktu_awal_alarm
 
-siklus_tampilan_lcd = 0
+    sekarang = time.ticks_ms()
 
-while True:
-    # 0. Cek instruksi masuk dari dashboard secara instan
-    cek_perintah_serial()
-
-    # ----------------------------------------------
-    # FITUR 1: MONITORING GAS & LOGIKA MONITOR HIJAU / 2 LED
-    # ----------------------------------------------
-    nilai_gas = sensor_gas.read()
-
-    if nilai_gas >= 1500:
-        status_polusi = "POLUSI TINGGI"
-        # 2 LED Tambahan: Peringatan Polusi MENYALA, Bersih MATI
-        led_polusi_warning.on()
-        led_udara_bersih.off()
-        # Monitor Hijau: Menampilkan peringatan bahaya polusi
-        update_monitor_lcd("STATUS: BAHAYA!", "Polusi: TINGGI")
-
-    elif nilai_gas >= 1000:
-        status_polusi = "POLUSI SEDANG"
-        # 2 LED Tambahan: Keduanya menyala (waspada)
-        led_polusi_warning.on()
-        led_udara_bersih.on()
-        # Monitor Hijau: Menampilkan status waspada
-        update_monitor_lcd("STATUS: WASPADA", "Gas: " + str(nilai_gas) + " Sedang")
-
+    if alarm_gas and alarm_seberang:
+        jenis_alarm = "both"
+    elif alarm_gas:
+        jenis_alarm = "gas"
+    elif alarm_seberang:
+        jenis_alarm = "seberang"
     else:
-        status_polusi = "UDARA BERSIH"
-        # 2 LED Tambahan: Peringatan MATI, Udara Bersih MENYALA
-        led_polusi_warning.off()
-        led_udara_bersih.on()
+        jenis_alarm = "none"
 
-        # Monitor Hijau: Bergantian menampilkan ucapan selamat datang dan kualitas udara
-        siklus_tampilan_lcd = (siklus_tampilan_lcd + 1) % 6
-        if siklus_tampilan_lcd < 3:
-            update_monitor_lcd("Selamat Datang", "Di Kota Pintar")
+    if jenis_alarm != jenis_alarm_sebelumnya:
+        jenis_alarm_sebelumnya = jenis_alarm
+        waktu_awal_alarm = sekarang
+
+    if jenis_alarm == "none":
+        buzzer.off()
+        return
+
+    if jenis_alarm == "both":
+        waktu_aktif = time.ticks_diff(sekarang, waktu_awal_alarm)
+        mode_gas = (waktu_aktif % (WAKTU_GANTI_MODE * 2) < WAKTU_GANTI_MODE)
+    elif jenis_alarm == "gas":
+        mode_gas = True
+    else:
+        mode_gas = False
+
+    if mode_gas:
+        fase = sekarang % INTERVAL_GAS
+        if fase < 120 or 220 <= fase < 340:
+            buzzer.on()
         else:
-            update_monitor_lcd("UrbanPulse Aman", "Gas: " + str(nilai_gas) + " Bersih")
+            buzzer.off()
+    else:
+        durasi_siklus = sum(bunyi + jeda for bunyi, jeda in POLA_SEBERANG)
+        waktu_pola = time.ticks_diff(sekarang, waktu_awal_alarm) % durasi_siklus
+        posisi = 0
+        status_buzzer = False
+
+        for bunyi, jeda in POLA_SEBERANG:
+            if posisi <= waktu_pola < posisi + bunyi:
+                status_buzzer = True
+                break
+            posisi += bunyi
+            if posisi <= waktu_pola < posisi + jeda:
+                status_buzzer = False
+                break
+            posisi += jeda
+
+        if status_buzzer:
+            buzzer.on()
+        else:
+            buzzer.off()
+
+# ==================================================
+# 11. PROGRAM UTAMA
+# ==================================================
+while True:
+    # 0. Periksa instruksi kendali dari Web Dashboard (non-blocking)
+    cek_perintah_jaringan()
+
+    print("\n================================")
+    print("    URBANPULSE SMART CITY")
+    print("================================")
+
+    # ----------------------------------------------
+    # FITUR 1: MONITORING POLUSI MQ + LCD
+    # ----------------------------------------------
+    if gas_override_mode == "MANUAL":
+        nilai_gas = nilai_gas_manual
+    else:
+        nilai_gas = sensor_gas.read()
+
+    if nilai_gas < 1000:
+        status_polusi = "UDARA BERSIH"
+    elif nilai_gas < 1500:
+        status_polusi = "POLUSI SEDANG"
+    else:
+        status_polusi = "POLUSI TINGGI"
+
+    alarm_gas = nilai_gas >= BATAS_GAS
+
+    if led_polusi_gas is not None:
+        if alarm_gas or status_polusi == "POLUSI SEDANG":
+            led_polusi_gas.on()
+        else:
+            led_polusi_gas.off()
+
+    if led_bersih_gas is not None:
+        if not alarm_gas:
+            led_bersih_gas.on()
+        else:
+            led_bersih_gas.off()
+
+    print("\nMONITORING POLUSI")
+    print("Nilai gas:", nilai_gas, f"({gas_override_mode})")
+    print("Status:", status_polusi)
+
+    if lcd is not None:
+        try:
+            lcd.move_to(0, 0)
+            lcd.putstr("Nilai MQ: {:4d}  ".format(nilai_gas))
+            lcd.move_to(0, 1)
+            lcd.putstr("{:<16}".format(status_polusi[:16]))
+        except Exception as e:
+            print("LCD bermasalah, monitoring dilanjutkan:", e)
+            lcd = None
 
     # ----------------------------------------------
     # FITUR 2: BACA DUA SENSOR ULTRASONIK
     # ----------------------------------------------
     jarak_kanan = baca_jarak_stabil(TRIG_KANAN, ECHO_KANAN)
-    time.sleep_ms(40)
-    cek_perintah_serial()
+    time.sleep_ms(60)
     jarak_kiri = baca_jarak_stabil(TRIG_KIRI, ECHO_KIRI)
 
-    # Deteksi objek fisik
+    print("\nMONITORING PENYEBERANGAN")
+    print("Jarak kanan:", "tidak terbaca" if jarak_kanan is None else str(round(jarak_kanan, 1)) + " cm")
+    print("Jarak kiri:", "tidak terbaca" if jarak_kiri is None else str(round(jarak_kiri, 1)) + " cm")
+
     orang_kanan = (jarak_kanan is not None and 0 < jarak_kanan <= BATAS_KANAN)
     orang_kiri = (jarak_kiri is not None and 0 < jarak_kiri <= BATAS_KIRI)
     ada_orang = orang_kanan or orang_kiri
 
-    # Periksa apakah dipicu oleh objek sensor ATAU tombol dashboard
-    pemicu_penyeberangan = (siap_menyeberang and ada_orang) or force_crossing_trigger
+    print("Deteksi kanan:", orang_kanan)
+    print("Deteksi kiri:", orang_kiri)
 
     # ----------------------------------------------
-    # SIKLUS PENYEBERANGAN (DAPAT DIKONTROL DASHBOARD)
+    # FITUR 3: SIKLUS LAMPU PENYEBERANGAN
     # ----------------------------------------------
-    if pemicu_penyeberangan:
-        siap_menyeberang = False
-        force_crossing_trigger = False
-        force_crossing_reset = False
+    sekarang = time.ticks_ms()
 
-        print(">>> SIKLUS PENYEBERANGAN DIMULAI!")
-        if ada_orang:
-            print(">>> DIPICU OLEH SENSOR ULTRASONIK")
+    if fase_penyeberangan == "HIJAU":
+        if siap_menyeberang and ada_orang:
+            siap_menyeberang = False
+            fase_penyeberangan = "KUNING"
+            waktu_fase = sekarang
+            print(">>> OBJEK TERDETEKSI!")
+            if orang_kanan:
+                print(">>> SENSOR KANAN MENDETEKSI")
+            if orang_kiri:
+                print(">>> SENSOR KIRI MENDETEKSI")
+
+    elif fase_penyeberangan == "KUNING":
+        if time.ticks_diff(sekarang, waktu_fase) >= WAKTU_KUNING:
+            fase_penyeberangan = "MERAH"
+            waktu_fase = sekarang
+            print(">>> LAMPU MERAH - MENYEBERANG")
+
+    elif fase_penyeberangan == "MERAH":
+        if time.ticks_diff(sekarang, waktu_fase) >= WAKTU_MENYEBRANG:
+            fase_penyeberangan = "TUNGGU_KOSONG"
+            print(">>> WAKTU MENYEBERANG SELESAI")
+
+    elif fase_penyeberangan == "TUNGGU_KOSONG":
+        if not ada_orang:
+            siap_menyeberang = True
+            fase_penyeberangan = "HIJAU"
+            print(">>> AREA KOSONG - SIAP MENDETEKSI LAGI")
         else:
-            print(">>> DIPICU OLEH KONTROL DASHBOARD")
+            print(">>> MENUNGGU OBJEK MENJAUH")
 
-        # Fase 1: Lampu Kuning (1 Detik)
+    if fase_penyeberangan == "HIJAU":
+        led_hijau.on()
+        led_kuning.off()
+        led_merah_penyeberangan.off()
+    elif fase_penyeberangan == "KUNING":
         led_hijau.off()
         led_kuning.on()
         led_merah_penyeberangan.off()
-        buzzer.off()
-        print(">>> LAMPU KUNING")
-
-        for _ in range(10):
-            cek_perintah_serial()
-            if force_crossing_reset:
-                break
-            time.sleep_ms(100)
-
-        # Fase 2: Lampu Merah + Buzzer (5 Detik)
-        if not force_crossing_reset:
-            led_kuning.off()
-            led_merah_penyeberangan.on()
-            print(">>> LAMPU MERAH - PENYEBERANG JALAN")
-
-            pola_bunyi = [
-                (0.15, 0.10),
-                (0.15, 0.10),
-                (0.15, 0.35),
-                (0.15, 0.10),
-                (0.15, 0.10),
-                (0.15, 0.35),
-            ]
-
-            for detik in range(WAKTU_MENYEBRANG, 0, -1):
-                if force_crossing_reset:
-                    break
-                print("Sisa waktu:", detik, "detik")
-
-                for bunyi, jeda in pola_bunyi:
-                    cek_perintah_serial()
-                    if force_crossing_reset:
-                        break
-                    buzzer.on()
-                    time.sleep(bunyi)
-                    buzzer.off()
-                    time.sleep(jeda)
-
-        # Siklus selesai atau direset
-        buzzer.off()
-        led_merah_penyeberangan.off()
+    elif fase_penyeberangan == "MERAH":
+        led_hijau.off()
         led_kuning.off()
-        led_hijau.on()
-        force_crossing_reset = False
-        print(">>> SELESAI - KEMBALI KE LAMPU HIJAU")
-
-    elif not siap_menyeberang:
+        led_merah_penyeberangan.on()
+    else:  # TUNGGU_KOSONG
         led_hijau.on()
         led_kuning.off()
         led_merah_penyeberangan.off()
-        buzzer.off()
-        if not ada_orang:
-            siap_menyeberang = True
-            print(">>> AREA KOSONG - SIAP MENDETEKSI LAGI")
 
-    else:
-        led_hijau.on()
-        led_kuning.off()
-        led_merah_penyeberangan.off()
-        buzzer.off()
+    alarm_seberang = (fase_penyeberangan == "MERAH")
 
     # ----------------------------------------------
-    # FITUR 3: SMART PJU (KONTROL AUTO / MANUAL DASHBOARD)
+    # FITUR 4: BUZZER DUA FUNGSI
+    # ----------------------------------------------
+    update_buzzer(alarm_gas, alarm_seberang)
+
+    # ----------------------------------------------
+    # FITUR 5: SMART PJU (OTOMATIS / KONTROL WEB)
     # ----------------------------------------------
     nilai_ldr = ldr.read()
 
-    if pju_mode == "ON":
+    print("\nSMART PJU")
+    print("Nilai LDR:", nilai_ldr)
+
+    # Cek apakah mode manual dari web sedang aktif
+    if pju_manual_mode == "ON":
         led_merah.on()
         led_putih.on()
-        pju_status = "MENYALA"
         kondisi_pju = "MANUAL_ON"
-    elif pju_mode == "OFF":
+        status_pju = "MENYALA"
+        print("Kondisi: MANUAL ON (KONTROL WEB) - PJU MENYALA")
+    elif pju_manual_mode == "OFF":
         led_merah.off()
         led_putih.off()
-        pju_status = "MATI"
         kondisi_pju = "MANUAL_OFF"
+        status_pju = "MATI"
+        print("Kondisi: MANUAL OFF (KONTROL WEB) - PJU MATI")
     else:
-        # MODE AUTO (Mengikuti Sensor LDR)
+        # Mode Otomatis Sensor LDR
         if nilai_ldr > THRESHOLD_LDR:
             led_merah.on()
             led_putih.on()
-            pju_status = "MENYALA"
             kondisi_pju = "GELAP"
+            status_pju = "MENYALA"
+            print("Kondisi: GELAP - PJU MENYALA")
         else:
             led_merah.off()
             led_putih.off()
-            pju_status = "MATI"
             kondisi_pju = "TERANG"
+            status_pju = "MATI"
+            print("Kondisi: TERANG - PJU MATI")
 
     # ----------------------------------------------
-    # KIRIM FORMAT TELEMETRI SERIAL & JSON KE DASHBOARD
+    # FORMAT JSON UNTUK JEMBATAN WEB DASHBOARD
     # ----------------------------------------------
-    lampu_status = "MERAH" if not siap_menyeberang and led_merah_penyeberangan.value() == 1 else "KUNING" if led_kuning.value() == 1 else "HIJAU"
-    j_kanan = str(round(jarak_kanan, 1)) if jarak_kanan is not None else "null"
-    j_kiri = str(round(jarak_kiri, 1)) if jarak_kiri is not None else "null"
+    jk_str = str(round(jarak_kanan, 1)) if jarak_kanan is not None else "null"
+    jkr_str = str(round(jarak_kiri, 1)) if jarak_kiri is not None else "null"
+    print(f'[JSON]{{"gas":{nilai_gas},"gasMode":"{gas_override_mode}","statusPolusi":"{status_polusi}","jarakKanan":{jk_str},"jarakKiri":{jkr_str},"orangKanan":{"true" if orang_kanan else "false"},"orangKiri":{"true" if orang_kiri else "false"},"lampu":"{fase_penyeberangan}","ldr":{nilai_ldr},"kondisi":"{kondisi_pju}","pjuStatus":"{status_pju}","pjuMode":"{pju_manual_mode}"}}')
 
-    # Baris JSON untuk komunikasi langsung dengan Web Serial / Bridge
-    print("[JSON]{\"gas\":" + str(nilai_gas) + ",\"statusPolusi\":\"" + status_polusi + "\",\"jarakKanan\":" + j_kanan + ",\"jarakKiri\":" + j_kiri + ",\"orangKanan\":" + ("true" if orang_kanan else "false") + ",\"orangKiri\":" + ("true" if orang_kiri else "false") + ",\"siapMenyeberang\":" + ("true" if siap_menyeberang else "false") + ",\"lampu\":\"" + lampu_status + "\",\"ldr\":" + str(nilai_ldr) + ",\"kondisi\":\"" + kondisi_pju + "\",\"pjuStatus\":\"" + pju_status + "\",\"pjuMode\":\"" + pju_mode + "\",\"ledPolusi\":" + ("true" if led_polusi_warning.value() == 1 else "false") + ",\"ledBersih\":" + ("true" if led_udara_bersih.value() == 1 else "false") + ",\"lcdTersedia\":" + ("true" if lcd_tersedia else "false") + "}")
+    # ----------------------------------------------
+    # RINGKASAN STATUS KOTA
+    # ----------------------------------------------
+    print("\n========== STATUS KOTA ==========")
+    print("Polusi:", status_polusi)
+    print("Alarm gas:", alarm_gas)
+    print("Objek kanan:", orang_kanan)
+    print("Objek kiri:", orang_kiri)
+    print("Fase penyeberangan:", fase_penyeberangan)
+    print("PJU:", status_pju, f"({pju_manual_mode})")
+    print("=================================")
 
-    # Kirim Telemetri ke Next.js Dashboard jika WiFi aktif
-    if ENABLE_WIFI_TELEMETRY:
-        try:
-            payload = {
-                "deviceId": "ESP32-MINIATURE",
-                "type": "miniature-all",
-                "payload": {
-                    "gas": {
-                        "gasValue": nilai_gas,
-                        "statusPolusi": status_polusi,
-                        "ledPolusi": led_polusi_warning.value() == 1,
-                        "ledBersih": led_udara_bersih.value() == 1
-                    },
-                    "crossing": {
-                        "jarakKanan": jarak_kanan,
-                        "jarakKiri": jarak_kiri,
-                        "orangKanan": orang_kanan,
-                        "orangKiri": orang_kiri,
-                        "batasKanan": BATAS_KANAN,
-                        "batasKiri": BATAS_KIRI,
-                        "lampu": lampu_status,
-                        "statusRingkasan": "OBJEK TERDETEKSI" if ada_orang else "AMAN"
-                    },
-                    "pju": {
-                        "ldrValue": nilai_ldr,
-                        "thresholdLdr": THRESHOLD_LDR,
-                        "kondisi": kondisi_pju,
-                        "pjuStatus": pju_status,
-                        "pjuMode": pju_mode,
-                        "ledMerah": led_merah.value() == 1,
-                        "ledPutih": led_putih.value() == 1
-                    },
-                    "monitorLcd": {
-                        "tersedia": lcd_tersedia,
-                        "baris1": cache_line1,
-                        "baris2": cache_line2
-                    }
-                }
-            }
-            urequests.post(DASHBOARD_API_URL, json=payload).close()
-        except Exception:
-            pass
-
-    # Jeda singkat sebelum membaca ulang sambil memeriksa serial
-    for _ in range(3):
-        cek_perintah_serial()
-        time.sleep_ms(100)
+    time.sleep_ms(50)

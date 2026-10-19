@@ -79,6 +79,7 @@ export interface GasAirQualityData {
   pinGas: number; // 39
   thresholdBersih: number; // 1000
   thresholdSedang: number; // 1500
+  gasMode?: 'AUTO' | 'MANUAL';
   isAlarmActive?: boolean;
   isAlarmMuted?: boolean;
   lastAlarmTime?: string;

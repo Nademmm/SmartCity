@@ -20,6 +20,7 @@ export const PollutionAlarmModal: React.FC = () => {
     snoozePollutionAlarm,
     isAudioMuted,
     toggleAudioMute,
+    controlGasManual,
   } = useSmartCity();
 
   if (!isPollutionAlarmActive || gas.statusPolusi !== 'POLUSI TINGGI') {
@@ -28,11 +29,17 @@ export const PollutionAlarmModal: React.FC = () => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Backdrop */}
-      <div className="fixed inset-0 bg-black/80 backdrop-blur-sm" />
+      {/* Backdrop with click-to-dismiss */}
+      <div 
+        onClick={dismissPollutionAlarm}
+        className="fixed inset-0 bg-black/80 backdrop-blur-sm cursor-pointer" 
+      />
 
       {/* Emergency Dialog Box */}
-      <div className="relative w-full max-w-lg bg-[#0F1422] border border-rose-500/60 rounded-xl shadow-2xl overflow-hidden z-10">
+      <div 
+        onClick={(e) => e.stopPropagation()}
+        className="relative w-full max-w-lg bg-[#0F1422] border border-rose-500/60 rounded-xl shadow-2xl overflow-hidden z-10"
+      >
         {/* Header */}
         <div className="bg-rose-950/60 border-b border-rose-500/30 px-5 py-3.5 flex items-center justify-between text-white">
           <div className="flex items-center gap-2.5">
@@ -117,19 +124,22 @@ export const PollutionAlarmModal: React.FC = () => {
           {/* Action Buttons */}
           <div className="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
             <button
-              onClick={dismissPollutionAlarm}
-              className="py-2 px-3 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-medium text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
+              onClick={() => {
+                controlGasManual('BERSIH');
+                dismissPollutionAlarm();
+              }}
+              className="py-2.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
             >
               <CheckCircle2 className="w-4 h-4" />
-              <p>Hentikan Alarm</p>
+              <p>Reset ke Udara Bersih</p>
             </button>
 
             <button
-              onClick={snoozePollutionAlarm}
-              className="py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
+              onClick={dismissPollutionAlarm}
+              className="py-2.5 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
             >
               <Clock className="w-4 h-4 text-amber-400" />
-              <p>Tunda 30 Detik</p>
+              <p>Hentikan Alarm (Senyap)</p>
             </button>
           </div>
         </div>

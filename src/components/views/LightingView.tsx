@@ -3,7 +3,6 @@
 import React from 'react';
 import { useSmartCity } from '@/context/SmartCityContext';
 import { MetricCard } from '@/components/common/MetricCard';
-import { TerminalConsole } from '@/components/common/TerminalConsole';
 import {
   Lightbulb,
   Sun,
@@ -12,10 +11,13 @@ import {
   Sliders,
   CheckCircle2,
   Info,
+  Terminal,
+  ArrowRight,
+  ShieldAlert,
 } from 'lucide-react';
 
 export const LightingView: React.FC = () => {
-  const { pju, setLdrValue, togglePjuDayNight, controlPjuManual, isHardwareConnected } = useSmartCity();
+  const { pju, setLdrValue, togglePjuDayNight, controlPjuManual, isHardwareConnected, setActiveSubsystem } = useSmartCity();
   const [currentClock, setCurrentClock] = React.useState<string>('');
 
   React.useEffect(() => {
@@ -116,9 +118,9 @@ export const LightingView: React.FC = () => {
         />
       </div>
 
-      {/* Visual Controls & Terminal Console */}
+      {/* Visual Controls & Automation Logic Card */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* Left Card */}
+        {/* Left Card: Controls */}
         <div className="lg:col-span-6 rounded-xl bg-slate-900/60 border border-slate-800/80 p-4 flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
@@ -188,6 +190,7 @@ export const LightingView: React.FC = () => {
                 <p>4095 (Sangat Gelap)</p>
               </div>
             </div>
+
             {/* Kontrol Aktuator PJU Langsung */}
             <div className="p-3.5 rounded-lg bg-slate-900 border border-slate-800 space-y-2 mt-3">
               <div className="flex justify-between text-xs text-slate-300 font-medium">
@@ -241,26 +244,85 @@ export const LightingView: React.FC = () => {
           </div>
         </div>
 
-        {/* Right Card: Terminal Console */}
-        <div className="lg:col-span-6 flex flex-col justify-between">
-          <TerminalConsole
-            filterFeature="pju"
-            title="Serial Output (Smart PJU)"
-            maxHeight="max-h-[380px]"
-          />
+        {/* Right Card: Logic and Specifications */}
+        <div className="lg:col-span-6 rounded-xl bg-slate-900/60 border border-slate-800/80 p-4 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
+              <h3 className="text-xs font-semibold text-white uppercase tracking-wider">
+                Logika Otomasi & Spesifikasi PJU
+              </h3>
+              <p className="text-[11px] font-mono text-slate-400">Firmware MicroPython</p>
+            </div>
 
-          <div className="mt-3 p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/80 flex items-center justify-between text-xs">
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <p className="text-white font-medium">Aktuator PJU Terhubung:</p>
+            <div className="my-3 space-y-3 text-xs">
+              {/* Logic Rule 1 */}
+              <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-800/80 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-white flex items-center gap-1.5">
+                    <Sun className="w-3.5 h-3.5 text-amber-400" />
+                    Kondisi Siang (Terang)
+                  </span>
+                  <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    LDR &lt;= 2000 ADC
+                  </span>
+                </div>
+                <p className="text-slate-400 text-[11px]">
+                  Saat intensitas cahaya lingkungan tinggi, hambatan sensor LDR menurun sehingga nilai tegangan ADC berada di bawah 2000. ESP32 mematikan Pin 25 dan Pin 26.
+                </p>
+              </div>
+
+              {/* Logic Rule 2 */}
+              <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-800/80 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-white flex items-center gap-1.5">
+                    <Moon className="w-3.5 h-3.5 text-cyan-400" />
+                    Kondisi Malam (Gelap)
+                  </span>
+                  <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                    LDR &gt; 2000 ADC
+                  </span>
+                </div>
+                <p className="text-slate-400 text-[11px]">
+                  Saat kondisi gelap atau tertutup bayangan, nilai ADC melampaui 2000. ESP32 secara instan memberikan sinyal HIGH ke kedua LED penerangan jalan.
+                </p>
+              </div>
+
+              {/* Hardware Pin Mapping */}
+              <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-800/80">
+                <p className="font-semibold text-white mb-2">Pemetaan Pin Fisik ESP32:</p>
+                <div className="grid grid-cols-3 gap-2 text-center font-mono text-[11px]">
+                  <div className="p-2 rounded bg-slate-900 border border-slate-800">
+                    <p className="text-slate-400 text-[10px]">Sensor LDR</p>
+                    <p className="text-cyan-400 font-bold">ADC Pin 36</p>
+                  </div>
+                  <div className="p-2 rounded bg-slate-900 border border-slate-800">
+                    <p className="text-slate-400 text-[10px]">LED Merah</p>
+                    <p className="text-rose-400 font-bold">GPIO Pin 25</p>
+                  </div>
+                  <div className="p-2 rounded bg-slate-900 border border-slate-800">
+                    <p className="text-slate-400 text-[10px]">LED Putih</p>
+                    <p className="text-amber-300 font-bold">GPIO Pin 26</p>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-2 font-mono text-slate-400 text-[11px]">
-              <p>LDR Pin 36</p>
-              <p>•</p>
-              <p>LED 25</p>
-              <p>•</p>
-              <p>LED 26</p>
+          </div>
+
+          {/* Bottom Bar with Link to Centralized Logs */}
+          <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 text-xs text-slate-400">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="text-[11px]">Aktuator PJU terhubung & siap dikontrol</span>
             </div>
+
+            <button
+              onClick={() => setActiveSubsystem('alerts')}
+              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 flex items-center gap-1.5 text-xs font-medium cursor-pointer transition-colors"
+            >
+              <Terminal className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Log Serial PJU</span>
+              <ArrowRight className="w-3 h-3" />
+            </button>
           </div>
         </div>
       </div>

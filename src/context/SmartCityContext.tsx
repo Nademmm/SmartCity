@@ -70,6 +70,7 @@ interface SmartCityContextType {
   updateUltrasonicDistances: (kanan: number, kiri: number) => void;
 
   // Gas Action Handlers
+  controlGasManual: (mode: 'AUTO' | 'BERSIH' | 'SEDANG' | 'BAHAYA' | number) => void;
   setGasSensorValue: (value: number) => void;
   isPollutionAlarmActive: boolean;
   dismissPollutionAlarm: () => void;
@@ -391,59 +392,101 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   const dismissPollutionAlarm = useCallback(() => {
     sounds.stopPollutionAlarm();
     setIsPollutionAlarmActive(false);
-  }, []);
+    // Tunda alarm selama 5 menit agar tidak terus-menerus muncul saat telemetri berjalan
+    setAlarmSnoozeUntil(Date.now() + 300000);
+    sendCommand('CMD:BUZZER_MUTE');
+    addEventLog('Sensor Gas MQ', 'Alarm Dihilangkan', 'Pengguna menghentikan alarm polusi darurat', 'MANUAL');
+  }, [sendCommand, addEventLog]);
 
   const snoozePollutionAlarm = useCallback(() => {
     sounds.stopPollutionAlarm();
     setIsPollutionAlarmActive(false);
-    setAlarmSnoozeUntil(Date.now() + 30000); // Tunda selama 30 detik
-  }, []);
+    setAlarmSnoozeUntil(Date.now() + 60000); // Tunda 1 menit
+    sendCommand('CMD:BUZZER_MUTE');
+    addEventLog('Sensor Gas MQ', 'Alarm Ditunda 1 Menit', 'Alarm polusi ditunda sementara', 'MANUAL');
+  }, [sendCommand, addEventLog]);
 
-  const setGasSensorValue = useCallback(
-    (value: number) => {
-      let statusPolusi: 'UDARA BERSIH' | 'POLUSI SEDANG' | 'POLUSI TINGGI' = 'UDARA BERSIH';
-      if (value < 1000) {
-        statusPolusi = 'UDARA BERSIH';
-      } else if (value < 1500) {
-        statusPolusi = 'POLUSI SEDANG';
-      } else {
-        statusPolusi = 'POLUSI TINGGI';
+  const controlGasManual = useCallback(
+    (mode: 'AUTO' | 'BERSIH' | 'SEDANG' | 'BAHAYA' | number) => {
+      sounds.playClick();
+      const nowTime = new Date().toLocaleTimeString('id-ID', { hour12: false }) + ' WIB';
+
+      if (mode === 'AUTO') {
+        sendCommand('CMD:GAS_AUTO');
+        setGas((prev) => ({
+          ...prev,
+          gasMode: 'AUTO',
+        }));
+        sounds.stopPollutionAlarm();
+        setIsPollutionAlarmActive(false);
+        addEventLog('Sensor Gas MQ', 'Mode Otomatis Aktif', 'Perintah CMD:GAS_AUTO dikirim (Membaca sensor fisik Pin 39)', 'MANUAL');
+        return;
       }
 
-      const nowTime = new Date().toLocaleTimeString('id-ID', { hour12: false }) + ' WIB';
-      const isHigh = value >= 1500;
-      const isMed = value >= 1000 && value < 1500;
+      let val = 650;
+      let cmd = 'CMD:GAS_BERSIH';
+      let title = 'Simulasi: Udara Bersih';
+
+      if (mode === 'BERSIH') {
+        val = 650;
+        cmd = 'CMD:GAS_BERSIH';
+        title = 'Simulasi: Udara Bersih (650 ADC)';
+      } else if (mode === 'SEDANG') {
+        val = 1250;
+        cmd = 'CMD:GAS_SEDANG';
+        title = 'Simulasi: Polusi Sedang (1250 ADC)';
+      } else if (mode === 'BAHAYA') {
+        val = 2100;
+        cmd = 'CMD:GAS_BAHAYA';
+        title = 'Simulasi: Polusi Tinggi (2100 ADC)';
+      } else if (typeof mode === 'number') {
+        val = Math.max(0, Math.min(4095, Math.round(mode)));
+        cmd = `CMD:GAS_SET:${val}`;
+        title = `Simulasi: Manual Nilai Gas (${val} ADC)`;
+      }
+
+      sendCommand(cmd);
+
+      const statusPolusi: 'UDARA BERSIH' | 'POLUSI SEDANG' | 'POLUSI TINGGI' =
+        val < 1000 ? 'UDARA BERSIH' : val < 1500 ? 'POLUSI SEDANG' : 'POLUSI TINGGI';
+      const isHigh = val >= 1500;
+      const isMed = val >= 1000 && val < 1500;
 
       setGas((prev) => ({
         ...prev,
-        gasValue: value,
+        gasValue: val,
+        gasMode: 'MANUAL',
         statusPolusi,
-        isAlarmActive: statusPolusi === 'POLUSI TINGGI',
-        lastAlarmTime: statusPolusi === 'POLUSI TINGGI' ? nowTime : prev.lastAlarmTime,
+        isAlarmActive: isHigh,
+        lastAlarmTime: isHigh ? nowTime : prev.lastAlarmTime,
         ledPolusi: isHigh || isMed,
         ledBersih: !isHigh,
         lcdBaris1: isHigh ? 'STATUS: BAHAYA!' : isMed ? 'STATUS: WASPADA' : 'Selamat Datang',
-        lcdBaris2: isHigh ? 'Polusi: TINGGI' : isMed ? `Gas: ${value} Sedang` : 'Di Kota Pintar',
+        lcdBaris2: isHigh ? 'Polusi: TINGGI' : isMed ? `Gas: ${val} Sedang` : 'Di Kota Pintar',
         lcdTersedia: true,
       }));
 
-      if (value >= 1500) {
-        addAlert('CRITICAL', 'Sensor Gas MQ', 'Peringatan Polusi Udara Tinggi!', `Nilai Gas ADC mencapai ${value}. Protokol alarm darurat aktif.`);
+      addEventLog('Sensor Gas MQ', title, `Perintah ${cmd} dikirim ke ESP32`, 'MANUAL');
+
+      if (isHigh) {
+        addAlert('CRITICAL', 'Sensor Gas MQ', 'Peringatan Polusi Udara Tinggi!', `Nilai Gas disimulasikan pada ${val} ADC.`);
         if (Date.now() > alarmSnoozeUntil) {
           setIsPollutionAlarmActive(true);
           sounds.startPollutionAlarm();
         }
-      } else if (value >= 1000) {
-        sounds.stopPollutionAlarm();
-        setIsPollutionAlarmActive(false);
-        addAlert('WARNING', 'Sensor Gas MQ', 'Polusi Udara Sedang', `Nilai Gas ADC mencapai ${value}. Terdeteksi peningkatan asap/emisi.`);
-        sounds.playAlert();
       } else {
         sounds.stopPollutionAlarm();
         setIsPollutionAlarmActive(false);
       }
     },
-    [addAlert, alarmSnoozeUntil]
+    [sendCommand, addEventLog, addAlert, alarmSnoozeUntil]
+  );
+
+  const setGasSensorValue = useCallback(
+    (value: number) => {
+      controlGasManual(value);
+    },
+    [controlGasManual]
   );
 
   // ==========================================================
@@ -675,43 +718,47 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
           }
 
           const g = gasPacket.payload;
-          const val = g.gasValue ?? g.nilai_gas ?? g.gas ?? gas.gasValue;
-          let statusPolusi: 'UDARA BERSIH' | 'POLUSI SEDANG' | 'POLUSI TINGGI' = 'UDARA BERSIH';
-          if (val < 1000) statusPolusi = 'UDARA BERSIH';
-          else if (val < 1500) statusPolusi = 'POLUSI SEDANG';
-          else statusPolusi = 'POLUSI TINGGI';
+          const incomingGasMode = g.gasMode || 'AUTO';
 
-          const nowTime = new Date().toLocaleTimeString('id-ID', { hour12: false }) + ' WIB';
+          setGas((prev) => {
+            const isManualMode = prev.gasMode === 'MANUAL' || incomingGasMode === 'MANUAL';
+            const val = isManualMode
+              ? (prev.gasMode === 'MANUAL' ? prev.gasValue : (g.gasValue ?? prev.gasValue))
+              : (g.gasValue ?? g.nilai_gas ?? g.gas ?? prev.gasValue);
 
-          const isHigh = statusPolusi === 'POLUSI TINGGI';
-          const isMed = statusPolusi === 'POLUSI SEDANG';
+            let statusPolusi: 'UDARA BERSIH' | 'POLUSI SEDANG' | 'POLUSI TINGGI' = 'UDARA BERSIH';
+            if (val < 1000) statusPolusi = 'UDARA BERSIH';
+            else if (val < 1500) statusPolusi = 'POLUSI SEDANG';
+            else statusPolusi = 'POLUSI TINGGI';
 
-          setGas((prev) => ({
-            ...prev,
-            gasValue: val,
-            statusPolusi: g.statusPolusi ?? g.status ?? statusPolusi,
-            isAlarmActive: statusPolusi === 'POLUSI TINGGI',
-            lastAlarmTime: statusPolusi === 'POLUSI TINGGI' ? nowTime : prev.lastAlarmTime,
-            ledPolusi: g.ledPolusi !== undefined ? g.ledPolusi : (isHigh || isMed),
-            ledBersih: g.ledBersih !== undefined ? g.ledBersih : !isHigh,
-            lcdBaris1: g.lcdBaris1 ?? (isHigh ? 'STATUS: BAHAYA!' : isMed ? 'STATUS: WASPADA' : 'Selamat Datang'),
-            lcdBaris2: g.lcdBaris2 ?? (isHigh ? 'Polusi: TINGGI' : isMed ? `Gas: ${val} Sedang` : 'Di Kota Pintar'),
-            lcdTersedia: g.lcdTersedia ?? true,
-          }));
+            const nowTime = new Date().toLocaleTimeString('id-ID', { hour12: false }) + ' WIB';
+            const isHigh = statusPolusi === 'POLUSI TINGGI';
+            const isMed = statusPolusi === 'POLUSI SEDANG';
 
-          if (statusPolusi === 'POLUSI TINGGI') {
-            if (Date.now() > alarmSnoozeUntil) {
-              setIsPollutionAlarmActive(true);
-              sounds.startPollutionAlarm();
+            if (isHigh) {
+              if (Date.now() > alarmSnoozeUntil) {
+                setIsPollutionAlarmActive(true);
+                sounds.startPollutionAlarm();
+              }
+            } else {
+              sounds.stopPollutionAlarm();
+              setIsPollutionAlarmActive(false);
             }
-          } else if (statusPolusi === 'POLUSI SEDANG') {
-            sounds.stopPollutionAlarm();
-            setIsPollutionAlarmActive(false);
-            sounds.playAlert();
-          } else {
-            sounds.stopPollutionAlarm();
-            setIsPollutionAlarmActive(false);
-          }
+
+            return {
+              ...prev,
+              gasValue: val,
+              gasMode: isManualMode ? 'MANUAL' : 'AUTO',
+              statusPolusi: g.statusPolusi ?? g.status ?? statusPolusi,
+              isAlarmActive: isHigh,
+              lastAlarmTime: isHigh ? (prev.lastAlarmTime || nowTime) : prev.lastAlarmTime,
+              ledPolusi: g.ledPolusi !== undefined ? g.ledPolusi : (isHigh || isMed),
+              ledBersih: g.ledBersih !== undefined ? g.ledBersih : !isHigh,
+              lcdBaris1: g.lcdBaris1 ?? (isHigh ? 'STATUS: BAHAYA!' : isMed ? 'STATUS: WASPADA' : 'Selamat Datang'),
+              lcdBaris2: g.lcdBaris2 ?? (isHigh ? 'Polusi: TINGGI' : isMed ? `Gas: ${val} Sedang` : 'Di Kota Pintar'),
+              lcdTersedia: g.lcdTersedia ?? true,
+            };
+          });
         }
 
         setIsHardwareConnected(espDataFresh);
@@ -785,6 +832,7 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
         triggerCrossingDetection,
         resetCrossingToSafe,
         updateUltrasonicDistances,
+        controlGasManual,
         setGasSensorValue,
         isPollutionAlarmActive,
         dismissPollutionAlarm,
