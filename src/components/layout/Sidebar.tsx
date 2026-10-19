@@ -9,10 +9,7 @@ import {
   Lightbulb,
   Footprints,
   Wind,
-  Cpu,
-  Zap,
-  Bell,
-  Activity,
+  Terminal,
   X,
 } from 'lucide-react';
 
@@ -22,19 +19,15 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
-  const { activeSubsystem, setActiveSubsystem, alerts, isHardwareConnected } = useSmartCity();
+  const { activeSubsystem, setActiveSubsystem, isHardwareConnected } = useSmartCity();
 
-  const unreadAlertsCount = alerts.filter((a) => !a.isRead && !a.isResolved).length;
-
-  const menuItems: { id: SubsystemType; label: string; icon: React.ReactNode; badge?: number }[] = [
-    { id: 'overview', label: 'Ringkasan Sistem', icon: <LayoutDashboard className="w-4 h-4" /> },
-    { id: 'traffic', label: 'Lalu Lintas (Kamera AI)', icon: <Navigation className="w-4 h-4" /> },
-    { id: 'lighting', label: 'Pencahayaan Jalan (LDR)', icon: <Lightbulb className="w-4 h-4" /> },
-    { id: 'pedestrian', label: 'Penyeberangan Jalan', icon: <Footprints className="w-4 h-4" /> },
-    { id: 'air-quality', label: 'Kualitas Udara (Gas MQ)', icon: <Wind className="w-4 h-4" /> },
-    { id: 'iot-devices', label: 'Hardware & Pinout', icon: <Cpu className="w-4 h-4" /> },
-    { id: 'automation', label: 'Logika Otomasi', icon: <Zap className="w-4 h-4" /> },
-    { id: 'alerts', label: 'Notifikasi & Log', icon: <Bell className="w-4 h-4" />, badge: unreadAlertsCount },
+  const menuItems: { id: SubsystemType; label: string; icon: React.ReactNode; color: string }[] = [
+    { id: 'overview', label: 'Ringkasan Sistem', icon: <LayoutDashboard className="w-4 h-4" />, color: 'text-[#0284c7]' },
+    { id: 'traffic', label: 'Lalu Lintas (Kamera)', icon: <Navigation className="w-4 h-4" />, color: 'text-[#0284c7]' },
+    { id: 'lighting', label: 'Penerangan Jalan (LDR)', icon: <Lightbulb className="w-4 h-4" />, color: 'text-[#d97706]' },
+    { id: 'pedestrian', label: 'Penyeberangan (Zebra)', icon: <Footprints className="w-4 h-4" />, color: 'text-[#e11d48]' },
+    { id: 'air-quality', label: 'Kualitas Udara (Gas)', icon: <Wind className="w-4 h-4" />, color: 'text-[#059669]' },
+    { id: 'alerts', label: 'Riwayat Log & Serial', icon: <Terminal className="w-4 h-4" />, color: 'text-[#4f46e5]' },
   ];
 
   const handleNavClick = (id: SubsystemType) => {
@@ -48,41 +41,37 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
       {isOpen && (
         <div
           onClick={onClose}
-          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden transition-opacity"
+          className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px] lg:hidden transition-opacity"
         />
       )}
 
       {/* Sidebar Container */}
       <aside
-        className={`fixed lg:static top-0 bottom-0 left-0 z-50 w-64 bg-[#0B0F19] border-r border-slate-800/80 flex flex-col justify-between transition-transform duration-200 ease-in-out ${
-          isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+        className={`fixed lg:static top-0 bottom-0 left-0 z-50 w-64 bg-[#e6ecf5] border-r border-[#d3dde9] flex flex-col justify-between transition-transform duration-200 ease-in-out ${
+          isOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0'
         }`}
       >
         <div>
           {/* Header */}
-          <div className="h-16 px-5 border-b border-slate-800/80 flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700/80 flex items-center justify-center text-cyan-400">
-                <Activity className="w-4 h-4" />
-              </div>
-              <div>
-                <h1 className="text-sm font-semibold tracking-tight text-white">Smart City</h1>
-                <p className="text-[11px] text-slate-400 font-mono">Control Center</p>
-              </div>
+          <div className="h-16 px-6 border-b border-[#d3dde9] flex items-center justify-between">
+            <div>
+              <h1 className="text-base font-extrabold tracking-tight text-[#19212d]">UrbanPulse</h1>
+              <p className="text-[11px] text-[#6e7e93] font-medium">Miniatur Kota Cerdas</p>
             </div>
 
             <button
               onClick={onClose}
-              className="lg:hidden p-1.5 rounded-md text-slate-400 hover:text-white hover:bg-slate-800"
+              className="lg:hidden p-2 rounded-xl text-[#4e5d71] neu-btn min-w-[44px] min-h-[44px] flex items-center justify-center cursor-pointer"
+              aria-label="Tutup menu navigasi"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
 
           {/* Navigation Menu */}
-          <nav className="p-3 space-y-1">
-            <p className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-              Modul IoT Miniatur
+          <nav className="p-4 space-y-2.5">
+            <p className="px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-[#6e7e93]">
+              Modul Perangkat
             </p>
             {menuItems.map((item) => {
               const isActive = activeSubsystem === item.id;
@@ -90,49 +79,41 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
                 <button
                   key={item.id}
                   onClick={() => handleNavClick(item.id)}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
+                  className={`w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-xs font-bold transition-all min-h-[44px] cursor-pointer ${
                     isActive
-                      ? 'bg-slate-800/90 text-white border border-slate-700/80'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent'
+                      ? 'neu-inset text-[#0284c7] font-extrabold shadow-inner'
+                      : 'neu-btn text-[#4e5d71] hover:text-[#19212d]'
                   }`}
                 >
-                  <div className="flex items-center gap-2.5">
-                    <div className={isActive ? 'text-cyan-400' : 'text-slate-400'}>{item.icon}</div>
-                    <p>{item.label}</p>
-                  </div>
-
-                  {item.badge !== undefined && item.badge > 0 && (
-                    <div className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                      {item.badge}
-                    </div>
-                  )}
+                  <span className={isActive ? 'text-[#0284c7]' : item.color}>
+                    {item.icon}
+                  </span>
+                  <span>{item.label}</span>
                 </button>
               );
             })}
           </nav>
         </div>
 
-        {/* System Telemetry Status */}
-        <div className="p-4 border-t border-slate-800/80 bg-[#090D16]">
-          <div className="space-y-2 text-xs">
+        {/* Real Hardware Telemetry Status */}
+        <div className="p-4 border-t border-[#d3dde9]">
+          <div className="p-3.5 rounded-2xl neu-inset space-y-2 text-xs">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-slate-400">
-                <div className={`w-2 h-2 rounded-full ${isHardwareConnected ? 'bg-emerald-400' : 'bg-slate-500'}`} />
-                <p>ESP32 Board</p>
-              </div>
-              <p className={`font-medium ${isHardwareConnected ? 'text-emerald-400' : 'text-slate-400'}`}>
-                {isHardwareConnected ? 'Terhubung' : 'Standby'}
-              </p>
+              <span className="text-[#6e7e93] font-medium">Board ESP32</span>
+              <span className={`font-bold flex items-center gap-1.5 ${isHardwareConnected ? 'text-[#059669]' : 'text-[#8e9eaf]'}`}>
+                <span className={`w-2 h-2 rounded-full ${isHardwareConnected ? 'bg-[#059669] shadow-[0_0_8px_#10b981]' : 'bg-[#8e9eaf]'}`} />
+                {isHardwareConnected ? 'Terhubung' : 'Siaga'}
+              </span>
             </div>
 
-            <div className="flex items-center justify-between">
-              <p className="text-slate-400">Firmware</p>
-              <p className="font-mono text-slate-300 text-[11px]">MicroPython</p>
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="text-[#6e7e93] font-medium">Port Serial</span>
+              <span className="font-mono font-bold text-[#19212d]">COM3 (115200)</span>
             </div>
 
-            <div className="flex items-center justify-between">
-              <p className="text-slate-400">Protokol</p>
-              <p className="font-mono text-slate-300 text-[11px]">Serial / HTTP</p>
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="text-[#6e7e93] font-medium">Firmware</span>
+              <span className="font-mono font-bold text-[#19212d]">MicroPython</span>
             </div>
           </div>
         </div>

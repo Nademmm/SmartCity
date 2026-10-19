@@ -5,16 +5,12 @@ import { SmartCityProvider, useSmartCity } from '@/context/SmartCityContext';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { Topbar } from '@/components/layout/Topbar';
 
-// Real Miniature & AI Camera Views
 import { OverviewView } from '@/components/views/OverviewView';
 import { TrafficView } from '@/components/views/TrafficView';
 import { LightingView } from '@/components/views/LightingView';
 import { PedestrianView } from '@/components/views/PedestrianView';
 import { AirQualityView } from '@/components/views/AirQualityView';
-import { IoTDevicesView } from '@/components/views/IoTDevicesView';
-import { AutomationView } from '@/components/views/AutomationView';
 import { AlertsView } from '@/components/views/AlertsView';
-
 import { PollutionAlarmModal } from '@/components/common/PollutionAlarmModal';
 
 const DashboardContent: React.FC = () => {
@@ -33,10 +29,6 @@ const DashboardContent: React.FC = () => {
         return <PedestrianView />;
       case 'air-quality':
         return <AirQualityView />;
-      case 'iot-devices':
-        return <IoTDevicesView />;
-      case 'automation':
-        return <AutomationView />;
       case 'alerts':
         return <AlertsView />;
       default:
@@ -45,8 +37,8 @@ const DashboardContent: React.FC = () => {
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[#0B0F19]">
-      {/* Pollution Emergency Alarm Modal & Strobe */}
+    <div className="flex h-screen w-screen overflow-hidden bg-[#e8e4dc] text-[#25282b]">
+      {/* Pollution Emergency Alarm Modal */}
       <PollutionAlarmModal />
 
       {/* Navigation Sidebar */}
@@ -59,8 +51,8 @@ const DashboardContent: React.FC = () => {
       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
         <Topbar onOpenMobileMenu={() => setIsMobileMenuOpen(true)} />
 
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6 pb-12">
-          <div className="max-w-7xl mx-auto">
+        <main className="flex-1 overflow-y-auto p-3.5 sm:p-5 lg:p-6 pb-12">
+          <div className="max-w-6xl mx-auto">
             {renderActiveView()}
           </div>
         </main>

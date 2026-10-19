@@ -6,15 +6,12 @@ interface MetricCardProps {
   title: string;
   value: string | number;
   unit?: string;
+  colorScheme?: 'emerald' | 'cyan' | 'amber' | 'rose' | 'indigo';
   statusText?: string;
-  statusVariant?: 'success' | 'warning' | 'danger' | 'info' | 'neutral';
-  trend?: {
-    value: string;
-    direction: 'up' | 'down' | 'neutral';
-    label: string;
-  };
-  icon: ReactNode;
+  statusVariant?: string;
   footerText?: string;
+  icon: ReactNode;
+  subtitle?: string;
   onClick?: () => void;
   className?: string;
 }
@@ -23,57 +20,90 @@ export const MetricCard: React.FC<MetricCardProps> = ({
   title,
   value,
   unit,
-  statusText,
-  statusVariant = 'neutral',
+  colorScheme = 'cyan',
   icon,
-  footerText,
+  subtitle,
   onClick,
   className = '',
 }) => {
-  const getStatusStyle = () => {
-    switch (statusVariant) {
-      case 'success':
-        return 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
-      case 'warning':
-        return 'text-amber-400 bg-amber-500/10 border-amber-500/20';
-      case 'danger':
-        return 'text-rose-400 bg-rose-500/10 border-rose-500/20';
-      case 'info':
-        return 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20';
-      case 'neutral':
+  const getThemeStyles = () => {
+    switch (colorScheme) {
+      case 'emerald':
+        return {
+          iconBg: 'bg-[#d1fae5] text-[#059669]',
+          valueColor: 'text-[#059669]',
+          dotColor: 'bg-[#10b981]',
+          borderHover: 'hover:border-[#a7f3d0]',
+        };
+      case 'amber':
+        return {
+          iconBg: 'bg-[#fef3c7] text-[#d97706]',
+          valueColor: 'text-[#d97706]',
+          dotColor: 'bg-[#f59e0b]',
+          borderHover: 'hover:border-[#fde68a]',
+        };
+      case 'rose':
+        return {
+          iconBg: 'bg-[#ffe4e6] text-[#e11d48]',
+          valueColor: 'text-[#e11d48]',
+          dotColor: 'bg-[#f43f5e]',
+          borderHover: 'hover:border-[#fecdd3]',
+        };
+      case 'indigo':
+        return {
+          iconBg: 'bg-[#e0e7ff] text-[#4f46e5]',
+          valueColor: 'text-[#4f46e5]',
+          dotColor: 'bg-[#6366f1]',
+          borderHover: 'hover:border-[#c7d2fe]',
+        };
+      case 'cyan':
       default:
-        return 'text-slate-400 bg-slate-800/40 border-slate-700/50';
+        return {
+          iconBg: 'bg-[#e0f2fe] text-[#0284c7]',
+          valueColor: 'text-[#0284c7]',
+          dotColor: 'bg-[#0ea5e9]',
+          borderHover: 'hover:border-[#bae6fd]',
+        };
     }
   };
+
+  const theme = getThemeStyles();
 
   return (
     <div
       onClick={onClick}
-      className={`rounded-xl bg-slate-900/60 border border-slate-800/80 p-4 transition-colors hover:border-slate-700 ${
-        onClick ? 'cursor-pointer hover:bg-slate-900/90' : ''
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={(e) => {
+        if (onClick && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      className={`rounded-2xl neu-raised p-5 border border-white/70 transition-all duration-200 ${
+        onClick
+          ? `cursor-pointer neu-raised-hover ${theme.borderHover} active:scale-[0.99]`
+          : ''
       } ${className}`}
     >
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <div className="flex items-center gap-2 text-slate-400">
-          <div className="text-slate-400">{icon}</div>
-          <h3 className="text-xs font-medium text-slate-400 truncate">{title}</h3>
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <h3 className="text-xs font-bold text-[#4e5d71] uppercase tracking-wider">{title}</h3>
+        <div className={`w-9 h-9 rounded-xl neu-inset flex items-center justify-center shrink-0 ${theme.iconBg}`}>
+          {icon}
         </div>
-        {statusText && (
-          <div className={`px-2 py-0.5 rounded text-[11px] font-medium border shrink-0 ${getStatusStyle()}`}>
-            {statusText}
-          </div>
-        )}
       </div>
 
-      <div className="flex items-baseline gap-1.5 my-1">
-        <p className="text-2xl font-bold tracking-tight text-white">{value}</p>
-        {unit && <p className="text-xs font-medium text-slate-400">{unit}</p>}
+      <div className="flex items-baseline gap-2 my-1">
+        <span className={`text-3xl font-extrabold tracking-tight font-mono ${theme.valueColor}`}>
+          {value}
+        </span>
+        {unit && <span className="text-xs font-semibold text-[#6e7e93] font-mono">{unit}</span>}
       </div>
 
-      {footerText && (
-        <div className="mt-3 pt-2.5 border-t border-slate-800/60 text-[11px] text-slate-400">
-          {footerText}
-        </div>
+      {subtitle && (
+        <p className="text-[11px] text-[#6e7e93] mt-2 font-medium">
+          {subtitle}
+        </p>
       )}
     </div>
   );

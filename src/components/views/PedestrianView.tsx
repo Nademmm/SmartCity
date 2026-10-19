@@ -8,12 +8,8 @@ import {
   Radio,
   Volume2,
   VolumeX,
-  CheckCircle2,
   RotateCcw,
   UserCheck,
-  Terminal,
-  ArrowRight,
-  ShieldCheck,
 } from 'lucide-react';
 
 export const PedestrianView: React.FC = () => {
@@ -22,347 +18,227 @@ export const PedestrianView: React.FC = () => {
     triggerCrossingDetection,
     resetCrossingToSafe,
     testBuzzerAlarm,
-    isHardwareConnected,
-    setActiveSubsystem,
   } = useSmartCity();
 
   const isMenyebrang = crossing.lampu === 'MERAH';
   const isKuning = crossing.lampu === 'KUNING';
 
   return (
-    <div className="space-y-4">
-      {/* Offline Hardware Banner */}
-      {!isHardwareConnected && (
-        <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/80 flex items-center justify-between text-xs text-slate-300">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-slate-500" />
-            <p>
-              Dual sensor ultrasonik (Pin 32/34 dan 33/35) menunggu koneksi ESP32.
-            </p>
-          </div>
-          <div className="font-mono text-[11px] text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800 shrink-0">
-            Standby
-          </div>
-        </div>
-      )}
-
-      {/* Alert Banner when Pedestrians Detected or Crossing */}
-      {(isMenyebrang || isKuning || !crossing.siapMenyeberang) && (
-        <div
-          className={`p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs ${
-            isMenyebrang
-              ? 'bg-rose-950/30 border-rose-500/40'
-              : isKuning
-              ? 'bg-amber-950/30 border-amber-500/40'
-              : 'bg-slate-900/60 border-slate-800'
-          }`}
-        >
-          <div className="flex items-center gap-2.5">
-            <Footprints
-              className={`w-4 h-4 shrink-0 ${isMenyebrang ? 'text-rose-400' : isKuning ? 'text-amber-400' : 'text-slate-400'}`}
-            />
+    <div className="space-y-6">
+      {/* Active Crossing Banner */}
+      {isMenyebrang && (
+        <div className="rounded-2xl p-4 bg-[#ffe4e6] border border-[#fecdd3] text-[#e11d48] flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Footprints className="w-5 h-5 text-[#e11d48] shrink-0" />
             <div>
-              <p className="font-semibold text-white">
-                {isMenyebrang
-                  ? `Penyeberangan Aktif: Lampu Merah Kendaraan (${crossing.countdownSeconds} detik)`
-                  : isKuning
-                  ? 'Transisi Lampu Kuning (1 detik)'
-                  : 'Siklus Penyeberangan Selesai'}
-              </p>
-              <p className="text-slate-400">
-                {crossing.orangKanan && crossing.orangKiri
-                  ? 'Objek terdeteksi pada kedua sensor ultrasonik (kanan & kiri).'
-                  : crossing.orangKanan
-                  ? 'Objek terdeteksi pada sensor kanan (jarak <= 17 cm).'
-                  : crossing.orangKiri
-                  ? 'Objek terdeteksi pada sensor kiri (jarak <= 25 cm).'
-                  : 'Area zebra cross lengang.'}
-              </p>
+              <p className="font-bold text-sm">Penyeberangan Aktif ({crossing.countdownSeconds}s)</p>
+              <p className="text-xs opacity-90">Kendaraan berhenti, pejalan kaki dipersilakan menyeberang.</p>
             </div>
           </div>
-
           <button
+            type="button"
             onClick={resetCrossingToSafe}
-            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium text-xs flex items-center gap-1.5 self-start sm:self-auto cursor-pointer transition-colors"
+            className="neu-btn px-4 py-2 rounded-xl text-xs font-bold text-[#059669] min-h-[44px]"
           >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <p>Reset Aman</p>
+            Reset Aman
           </button>
         </div>
       )}
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      {/* 4 Clean Metric Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard
-          title="Sensor Ultrasonik Kanan"
-          value={crossing.jarakKanan !== null ? `${Math.round(crossing.jarakKanan * 10) / 10} cm` : '-'}
-          statusText={crossing.orangKanan ? 'Objek Dekat (<= 17cm)' : 'Aman (> 17cm)'}
-          statusVariant={crossing.orangKanan ? 'danger' : 'success'}
-          icon={<Radio className="w-4 h-4" />}
-          footerText={`TRIG 32 | ECHO 34 (Batas: ${crossing.batasKanan} cm)`}
+          title="Ultrasonik Kanan"
+          value={crossing.jarakKanan !== null ? `${Math.round(crossing.jarakKanan * 10) / 10}` : '-'}
+          unit="cm"
+          colorScheme={crossing.orangKanan ? 'rose' : 'emerald'}
+          icon={<Radio className="w-5 h-5" />}
+          subtitle={`Batas Deteksi: ${crossing.batasKanan} cm`}
         />
 
         <MetricCard
-          title="Sensor Ultrasonik Kiri"
-          value={crossing.jarakKiri !== null ? `${Math.round(crossing.jarakKiri * 10) / 10} cm` : '-'}
-          statusText={crossing.orangKiri ? 'Objek Dekat (<= 25cm)' : 'Aman (> 25cm)'}
-          statusVariant={crossing.orangKiri ? 'danger' : 'success'}
-          icon={<Radio className="w-4 h-4" />}
-          footerText={`TRIG 33 | ECHO 35 (Batas: ${crossing.batasKiri} cm)`}
+          title="Ultrasonik Kiri"
+          value={crossing.jarakKiri !== null ? `${Math.round(crossing.jarakKiri * 10) / 10}` : '-'}
+          unit="cm"
+          colorScheme={crossing.orangKiri ? 'rose' : 'emerald'}
+          icon={<Radio className="w-5 h-5" />}
+          subtitle={`Batas Deteksi: ${crossing.batasKiri} cm`}
         />
 
         <MetricCard
-          title="Lampu Penyeberangan"
-          value={`LAMPU ${crossing.lampu}`}
-          statusText={
-            crossing.lampu === 'MERAH'
-              ? `Berjalan (${crossing.countdownSeconds}s)`
-              : crossing.lampu === 'KUNING'
-              ? 'Kuning (1s)'
-              : 'Kendaraan Jalan (Hijau)'
-          }
-          statusVariant={crossing.lampu === 'MERAH' ? 'danger' : crossing.lampu === 'KUNING' ? 'warning' : 'success'}
-          icon={<Footprints className="w-4 h-4" />}
-          footerText="Hijau: Pin 12 | Kuning: Pin 14 | Merah: Pin 27"
+          title="Lampu Sinyal"
+          value={crossing.lampu}
+          unit={isMenyebrang ? `${crossing.countdownSeconds}s` : undefined}
+          colorScheme={isMenyebrang ? 'rose' : isKuning ? 'amber' : 'emerald'}
+          icon={<Footprints className="w-5 h-5" />}
+          subtitle={isMenyebrang ? 'Pejalan Kaki Jalan' : 'Kendaraan Jalan'}
         />
 
         <MetricCard
-          title="Buzzer Penyeberangan"
-          value={crossing.buzzer ? 'BUNYI AKTIF' : 'MATI'}
-          statusText={crossing.buzzer ? 'Pola Tototot' : 'Standby'}
-          statusVariant={crossing.buzzer ? 'danger' : 'neutral'}
-          icon={crossing.buzzer ? <Volume2 className="w-4 h-4 text-rose-400" /> : <VolumeX className="w-4 h-4" />}
-          footerText="Aktuator Buzzer Pin 13"
+          title="Buzzer Audio"
+          value={crossing.buzzer ? 'BUNYI' : 'SIAGA'}
+          colorScheme={crossing.buzzer ? 'rose' : 'indigo'}
+          icon={crossing.buzzer ? <Volume2 className="w-5 h-5 text-[#e11d48]" /> : <VolumeX className="w-5 h-5" />}
+          subtitle="Pemberitahuan Aman"
         />
       </div>
 
-      {/* Schematic Road Visualizer & Sequence Specifications */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* Left: Road & Zebra Cross Visualizer */}
-        <div className="lg:col-span-7 rounded-xl bg-slate-900/60 border border-slate-800/80 p-4 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
-              <h3 className="text-xs font-semibold text-white uppercase tracking-wider">
-                Simulasi Jalur Penyeberangan
-              </h3>
-              <p className="text-[11px] font-mono text-slate-400">Durasi: 5 Detik</p>
+      {/* Visual Road Simulation & Controls */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Left: Visual Road & Traffic Light */}
+        <div className={`lg:col-span-7 neu-raised ${isMenyebrang ? 'neu-glow-rose' : 'neu-glow-emerald'} rounded-3xl p-8 border border-white/80 flex flex-col items-center justify-between transition-all duration-300`}>
+          <div className="flex items-center justify-between w-full mb-4">
+            <h2 className="text-xs font-bold text-[#4e5d71] uppercase tracking-wider">
+              Visualisasi Penyeberangan Pintar
+            </h2>
+            <button
+              type="button"
+              onClick={resetCrossingToSafe}
+              className="neu-btn px-4 py-2 rounded-xl text-xs font-bold text-[#059669] flex items-center gap-1.5 min-h-[44px]"
+            >
+              <RotateCcw className="w-4 h-4" />
+              <span>Reset Aman</span>
+            </button>
+          </div>
+
+          {/* Traffic Signal Lights Graphic */}
+          <div className="neu-inset p-4 rounded-3xl flex items-center gap-4 my-6">
+            {/* Merah */}
+            <div
+              className={`w-14 h-14 rounded-full flex items-center justify-center font-mono font-extrabold text-sm transition-all duration-300 ${
+                crossing.lampu === 'MERAH'
+                  ? 'bg-[#e11d48] text-white shadow-[0_0_20px_rgba(225,29,72,0.6)] scale-110'
+                  : 'bg-[#dbe3ee] text-[#8e9eaf]'
+              }`}
+            >
+              {crossing.lampu === 'MERAH' ? `${crossing.countdownSeconds}s` : ''}
             </div>
 
-            {/* Visualizer Road */}
-            <div className="my-4 p-5 rounded-xl bg-slate-950/80 border border-slate-800/80 flex flex-col items-center justify-center">
-              {/* Traffic Light Head */}
-              <div className="flex items-center gap-3 mb-5 bg-slate-900 p-2 rounded-xl border border-slate-800">
-                <div
-                  className={`w-8 h-8 rounded-full border flex items-center justify-center font-bold text-[10px] ${
-                    crossing.lampu === 'MERAH'
-                      ? 'bg-rose-500 border-rose-400 text-white'
-                      : 'bg-rose-950/20 border-rose-900/30 text-rose-900/40'
-                  }`}
-                >
-                  {crossing.lampu === 'MERAH' && `${crossing.countdownSeconds}s`}
-                </div>
-
-                <div
-                  className={`w-8 h-8 rounded-full border flex items-center justify-center font-bold text-[10px] ${
-                    crossing.lampu === 'KUNING'
-                      ? 'bg-amber-400 border-amber-300 text-black'
-                      : 'bg-amber-950/20 border-amber-900/30 text-amber-900/40'
-                  }`}
-                >
-                  {crossing.lampu === 'KUNING' && '1s'}
-                </div>
-
-                <div
-                  className={`w-8 h-8 rounded-full border flex items-center justify-center font-bold text-[10px] ${
-                    crossing.lampu === 'HIJAU'
-                      ? 'bg-emerald-400 border-emerald-300 text-black'
-                      : 'bg-emerald-950/20 border-emerald-900/30 text-emerald-900/40'
-                  }`}
-                >
-                  {crossing.lampu === 'HIJAU' && 'GO'}
-                </div>
-              </div>
-
-              {/* Zebra Cross Grid */}
-              <div className="w-full max-w-md bg-slate-900 p-3 rounded-xl border border-slate-800 flex items-center justify-between gap-3">
-                {/* Left Sensor */}
-                <div
-                  className={`p-2.5 rounded-lg border flex flex-col items-center gap-0.5 text-center transition-colors ${
-                    crossing.orangKiri
-                      ? 'bg-rose-950/50 border-rose-500/60 text-rose-300'
-                      : 'bg-slate-950 border-slate-800 text-slate-400'
-                  }`}
-                >
-                  <Radio className="w-4 h-4 text-cyan-400" />
-                  <p className="text-[10px] font-semibold">Sensor Kiri</p>
-                  <p className="text-xs font-mono font-bold text-white">
-                    {crossing.jarakKiri !== null ? `${Math.round(crossing.jarakKiri * 10) / 10} cm` : '-'}
-                  </p>
-                  <p className="text-[9px] text-slate-400 font-mono">&lt;= {crossing.batasKiri}cm</p>
-                </div>
-
-                {/* Zebra Stripes */}
-                <div className="flex-1 flex justify-center gap-2 px-1">
-                  {[...Array(6)].map((_, i) => (
-                    <div
-                      key={i}
-                      className={`h-12 w-2.5 rounded-sm transition-colors ${
-                        crossing.lampu === 'MERAH' ? 'bg-rose-400/80' : 'bg-slate-700'
-                      }`}
-                    />
-                  ))}
-                </div>
-
-                {/* Right Sensor */}
-                <div
-                  className={`p-2.5 rounded-lg border flex flex-col items-center gap-0.5 text-center transition-colors ${
-                    crossing.orangKanan
-                      ? 'bg-rose-950/50 border-rose-500/60 text-rose-300'
-                      : 'bg-slate-950 border-slate-800 text-slate-400'
-                  }`}
-                >
-                  <Radio className="w-4 h-4 text-cyan-400" />
-                  <p className="text-[10px] font-semibold">Sensor Kanan</p>
-                  <p className="text-xs font-mono font-bold text-white">
-                    {crossing.jarakKanan !== null ? `${Math.round(crossing.jarakKanan * 10) / 10} cm` : '-'}
-                  </p>
-                  <p className="text-[9px] text-slate-400 font-mono">&lt;= {crossing.batasKanan}cm</p>
-                </div>
-              </div>
-
-              <div className="mt-3 text-center text-xs text-slate-400">
-                <p>Status: <span className="font-semibold text-white">{crossing.statusRingkasan}</span></p>
-              </div>
+            {/* Kuning */}
+            <div
+              className={`w-14 h-14 rounded-full flex items-center justify-center font-mono font-extrabold text-sm transition-all duration-300 ${
+                crossing.lampu === 'KUNING'
+                  ? 'bg-[#d97706] text-white shadow-[0_0_20px_rgba(217,119,6,0.6)] scale-110'
+                  : 'bg-[#dbe3ee] text-[#8e9eaf]'
+              }`}
+            >
+              {crossing.lampu === 'KUNING' ? '1s' : ''}
             </div>
 
-            {/* Test Trigger Buttons */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
-              <button
-                onClick={() => triggerCrossingDetection('kanan')}
-                className="py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <UserCheck className="w-3.5 h-3.5 text-cyan-400" />
-                <p>Uji Sisi Kanan</p>
-              </button>
-
-              <button
-                onClick={() => triggerCrossingDetection('kiri')}
-                className="py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <UserCheck className="w-3.5 h-3.5 text-cyan-400" />
-                <p>Uji Sisi Kiri</p>
-              </button>
-
-              <button
-                onClick={() => triggerCrossingDetection('kedua')}
-                className="py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <Footprints className="w-3.5 h-3.5 text-cyan-400" />
-                <p>Uji Kedua Sisi</p>
-              </button>
-
-              <button
-                onClick={testBuzzerAlarm}
-                className="py-2 px-3 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-xs font-medium transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <Volume2 className="w-3.5 h-3.5 text-indigo-400" />
-                <p>Uji Buzzer (Pin 13)</p>
-              </button>
+            {/* Hijau */}
+            <div
+              className={`w-14 h-14 rounded-full flex items-center justify-center font-mono font-extrabold text-sm transition-all duration-300 ${
+                crossing.lampu === 'HIJAU'
+                  ? 'bg-[#059669] text-white shadow-[0_0_20px_rgba(5,150,105,0.6)] scale-110'
+                  : 'bg-[#dbe3ee] text-[#8e9eaf]'
+              }`}
+            >
+              {crossing.lampu === 'HIJAU' ? 'JALAN' : ''}
             </div>
           </div>
 
-          <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
-            <p>Buzzer berbunyi pola tototot saat lampu merah aktif.</p>
-            <p className="font-mono text-slate-400">Buzzer Pin 13</p>
+          {/* Dual Ultrasonic Meter Bars */}
+          <div className="w-full grid grid-cols-2 gap-4 mt-2">
+            <div className={`p-4 rounded-2xl neu-inset border transition-all ${crossing.orangKiri ? 'border-[#fecdd3] bg-[#ffe4e6]' : 'border-transparent'}`}>
+              <div className="flex justify-between items-center text-xs font-bold mb-1">
+                <span className="text-[#4e5d71]">Sensor Kiri:</span>
+                <span className="font-mono text-[#0284c7]">
+                  {crossing.jarakKiri !== null ? `${Math.round(crossing.jarakKiri)} cm` : '-'}
+                </span>
+              </div>
+              <div className="w-full h-2 rounded-full bg-[#dbe3ee] overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all duration-200"
+                  style={{
+                    width: `${Math.min(100, ((crossing.jarakKiri || 50) / 50) * 100)}%`,
+                    backgroundColor: crossing.orangKiri ? '#e11d48' : '#059669',
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className={`p-4 rounded-2xl neu-inset border transition-all ${crossing.orangKanan ? 'border-[#fecdd3] bg-[#ffe4e6]' : 'border-transparent'}`}>
+              <div className="flex justify-between items-center text-xs font-bold mb-1">
+                <span className="text-[#4e5d71]">Sensor Kanan:</span>
+                <span className="font-mono text-[#0284c7]">
+                  {crossing.jarakKanan !== null ? `${Math.round(crossing.jarakKanan)} cm` : '-'}
+                </span>
+              </div>
+              <div className="w-full h-2 rounded-full bg-[#dbe3ee] overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all duration-200"
+                  style={{
+                    width: `${Math.min(100, ((crossing.jarakKanan || 50) / 50) * 100)}%`,
+                    backgroundColor: crossing.orangKanan ? '#e11d48' : '#059669',
+                  }}
+                />
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Right: Sequence & Hardware Specifications */}
-        <div className="lg:col-span-5 rounded-xl bg-slate-900/60 border border-slate-800/80 p-4 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
-              <h3 className="text-xs font-semibold text-white uppercase tracking-wider">
-                Alur Siklus & Spesifikasi Hardware
+        {/* Right: Tactile Simulation Buttons */}
+        <div className="lg:col-span-5 neu-raised rounded-3xl p-6 border border-white/80 flex flex-col justify-between">
+          <div className="space-y-5">
+            <div className="pb-3 border-b border-[#d3dde9]">
+              <h3 className="text-xs font-bold text-[#4e5d71] uppercase tracking-wider">
+                Simulasi Uji Penyeberangan
               </h3>
-              <p className="text-[11px] font-mono text-slate-400">Sistem Keamanan</p>
             </div>
 
-            <div className="my-3 space-y-2.5 text-xs">
-              {/* Step 1 */}
-              <div className="p-2.5 rounded-lg bg-slate-950/80 border border-slate-800/80 flex items-start gap-2.5">
-                <span className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5">
-                  1
-                </span>
-                <div>
-                  <p className="font-medium text-white">Status Hijau (Kendaraan Berjalan)</p>
-                  <p className="text-[11px] text-slate-400">
-                    Lampu Hijau (Pin 12) menyala. Kedua sensor ultrasonik HC-SR04 terus memindai objek.
-                  </p>
+            <div className="grid grid-cols-1 gap-3">
+              <button
+                type="button"
+                onClick={() => triggerCrossingDetection('kanan')}
+                className="neu-btn py-3.5 px-4 rounded-2xl text-xs font-bold text-[#19212d] flex items-center justify-between min-h-[44px]"
+              >
+                <div className="flex items-center gap-2.5">
+                  <UserCheck className="w-4 h-4 text-[#0284c7]" />
+                  <span>Uji Pejalan Kaki (Kanan)</span>
                 </div>
-              </div>
+                <span className="font-mono text-[11px] text-[#6e7e93]">&lt;= 17 cm</span>
+              </button>
 
-              {/* Step 2 */}
-              <div className="p-2.5 rounded-lg bg-slate-950/80 border border-slate-800/80 flex items-start gap-2.5">
-                <span className="w-5 h-5 rounded-full bg-amber-500/20 text-amber-300 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5">
-                  2
-                </span>
-                <div>
-                  <p className="font-medium text-white">Transisi Kuning (1 Detik)</p>
-                  <p className="text-[11px] text-slate-400">
-                    Saat pejalan kaki mendekat, lampu kuning (Pin 14) menyala selama 1 detik sebagai peringatan.
-                  </p>
+              <button
+                type="button"
+                onClick={() => triggerCrossingDetection('kiri')}
+                className="neu-btn py-3.5 px-4 rounded-2xl text-xs font-bold text-[#19212d] flex items-center justify-between min-h-[44px]"
+              >
+                <div className="flex items-center gap-2.5">
+                  <UserCheck className="w-4 h-4 text-[#0284c7]" />
+                  <span>Uji Pejalan Kaki (Kiri)</span>
                 </div>
-              </div>
+                <span className="font-mono text-[11px] text-[#6e7e93]">&lt;= 25 cm</span>
+              </button>
 
-              {/* Step 3 */}
-              <div className="p-2.5 rounded-lg bg-slate-950/80 border border-slate-800/80 flex items-start gap-2.5">
-                <span className="w-5 h-5 rounded-full bg-rose-500/20 text-rose-300 flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5">
-                  3
-                </span>
-                <div>
-                  <p className="font-medium text-white">Penyeberangan Merah (5 Detik) + Buzzer</p>
-                  <p className="text-[11px] text-slate-400">
-                    Lampu Merah (Pin 27) aktif. Buzzer (Pin 13) berbunyi pola tototot memberi sinyal audio aman menyeberang.
-                  </p>
+              <button
+                type="button"
+                onClick={() => triggerCrossingDetection('kedua')}
+                className="neu-btn py-3.5 px-4 rounded-2xl text-xs font-bold text-[#19212d] flex items-center justify-between min-h-[44px]"
+              >
+                <div className="flex items-center gap-2.5">
+                  <Footprints className="w-4 h-4 text-[#059669]" />
+                  <span>Uji Kedua Sisi Sekaligus</span>
                 </div>
-              </div>
+                <span className="font-mono text-[11px] text-[#6e7e93]">Simultan</span>
+              </button>
 
-              {/* Hardware Pin Summary */}
-              <div className="p-2.5 rounded-lg bg-slate-950/80 border border-slate-800/80">
-                <p className="font-semibold text-white mb-1.5 text-[11px]">Pinout Terkoneksi ke ESP32:</p>
-                <div className="grid grid-cols-2 gap-1.5 font-mono text-[10px] text-slate-300">
-                  <div className="bg-slate-900 px-2 py-1 rounded border border-slate-800">
-                    Kanan: TRIG 32 / ECHO 34
-                  </div>
-                  <div className="bg-slate-900 px-2 py-1 rounded border border-slate-800">
-                    Kiri: TRIG 33 / ECHO 35
-                  </div>
-                  <div className="bg-slate-900 px-2 py-1 rounded border border-slate-800">
-                    LED: 12 (H), 14 (K), 27 (M)
-                  </div>
-                  <div className="bg-slate-900 px-2 py-1 rounded border border-slate-800">
-                    Buzzer: GPIO Pin 13
-                  </div>
+              <button
+                type="button"
+                onClick={testBuzzerAlarm}
+                className="neu-btn py-3.5 px-4 rounded-2xl text-xs font-bold text-[#e11d48] flex items-center justify-between min-h-[44px]"
+              >
+                <div className="flex items-center gap-2.5">
+                  <Volume2 className="w-4 h-4 text-[#e11d48]" />
+                  <span>Uji Suara Buzzer</span>
                 </div>
-              </div>
+                <span className="font-mono text-[11px] text-[#6e7e93]">Audio Tototot</span>
+              </button>
             </div>
           </div>
 
-          {/* Bottom Bar with Link to Centralized Logs */}
-          <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5 text-xs text-slate-400">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="text-[11px]">Dual sensor ultrasonik aktif</span>
-            </div>
-
-            <button
-              onClick={() => setActiveSubsystem('alerts')}
-              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 flex items-center gap-1.5 text-xs font-medium cursor-pointer transition-colors"
-            >
-              <Terminal className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Log Penyeberangan</span>
-              <ArrowRight className="w-3 h-3" />
-            </button>
+          <div className="pt-4 border-t border-[#d3dde9] text-xs font-medium text-[#6e7e93] text-center">
+            Lampu merah aktif selama 5 detik dengan sinyal audio buzzer.
           </div>
         </div>
       </div>

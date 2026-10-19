@@ -12,12 +12,8 @@ import {
   Video,
   Sun,
   Moon,
-  Clock,
   ArrowRight,
   Terminal,
-  CheckCircle2,
-  Activity,
-  Zap,
 } from 'lucide-react';
 
 export const OverviewView: React.FC = () => {
@@ -31,298 +27,265 @@ export const OverviewView: React.FC = () => {
     setActiveSubsystem,
     togglePjuDayNight,
     triggerCrossingDetection,
-    lastTelemetryTimestamp,
   } = useSmartCity();
 
   const isGelap = pju.kondisi === 'GELAP';
   const isMenyebrang = crossing.lampu === 'MERAH';
+  const isPolusiTinggi = gas.gasValue >= 1500;
 
   return (
-    <div className="space-y-4">
-      {/* Executive Hardware Status Bar */}
-      <div className="rounded-xl bg-slate-900/60 border border-slate-800/80 p-4">
+    <div className="space-y-6">
+      {/* Board Hardware Status Strip */}
+      <div className="neu-raised rounded-3xl p-5 border border-white/80">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${isHardwareConnected ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
-              <h2 className="text-sm font-semibold text-white">
-                {isHardwareConnected ? 'ESP32 Miniatur Aktif' : 'ESP32 Miniatur Standby'}
+          <div className="flex items-center gap-3">
+            <div className={`w-3 h-3 rounded-full shrink-0 ${isHardwareConnected ? 'bg-[#059669] shadow-[0_0_10px_#10b981]' : 'bg-[#8e9eaf]'}`} />
+            <div>
+              <h2 className="text-sm font-bold text-[#19212d]">
+                {isHardwareConnected ? 'ESP32 Miniatur Terhubung' : 'ESP32 Miniatur Siaga'}
               </h2>
-              <div className="text-[11px] text-slate-400 font-mono">MicroPython Core (COM3)</div>
-            </div>
-            <p className="text-xs text-slate-400">
-              {isHardwareConnected
-                ? 'Telemetri mengalir secara real-time dari mikrokontroler ESP32.'
-                : 'Menunggu koneksi board. Hubungkan kabel USB dan jalankan bridge serial.'}
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2 text-xs">
-            <div className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 flex items-center gap-2">
-              <p className="text-slate-400">Kamera:</p>
-              <p className={`font-medium ${isCameraConnected ? 'text-emerald-400' : 'text-slate-400'}`}>
-                {isCameraConnected ? 'Aktif' : 'Standby'}
+              <p className="text-xs text-[#6e7e93]">
+                {isHardwareConnected
+                  ? 'Telemetri ADC dialirkan secara langsung dari mikrokontroler.'
+                  : 'Hubungkan kabel data USB dan aktifkan serial bridge untuk sinkronisasi.'}
               </p>
             </div>
-            <div className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 flex items-center gap-2">
-              <p className="text-slate-400">Status Kota:</p>
-              <p className="font-medium text-emerald-400">{crossing.statusRingkasan}</p>
+          </div>
+
+          <div className="flex items-center gap-3 text-xs">
+            <div className="neu-inset px-3.5 py-2 rounded-xl flex items-center gap-2">
+              <span className="text-[#6e7e93]">Kamera:</span>
+              <span className={`font-bold ${isCameraConnected ? 'text-[#059669]' : 'text-[#8e9eaf]'}`}>
+                {isCameraConnected ? 'Aktif' : 'Siaga'}
+              </span>
+            </div>
+            <div className="neu-inset px-3.5 py-2 rounded-xl flex items-center gap-2">
+              <span className="text-[#6e7e93]">Port:</span>
+              <span className="font-mono font-bold text-[#0284c7]">COM3</span>
             </div>
           </div>
         </div>
       </div>
 
       {/* 4 Core Telemetry Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* 1. Gas MQ */}
         <MetricCard
-          title="Kualitas Udara (Gas MQ)"
+          title="Kualitas Udara"
           value={gas.gasValue}
           unit="ADC"
-          statusText={gas.statusPolusi}
-          statusVariant={
-            gas.statusPolusi === 'POLUSI TINGGI'
-              ? 'danger'
-              : gas.statusPolusi === 'POLUSI SEDANG'
-              ? 'warning'
-              : 'success'
-          }
-          icon={<Wind className="w-4 h-4" />}
-          footerText={`ADC Pin ${gas.pinGas} (Ambang: 1000 / 1500)`}
+          colorScheme={isPolusiTinggi ? 'rose' : gas.gasValue >= 1000 ? 'amber' : 'emerald'}
+          icon={<Wind className="w-5 h-5" />}
+          subtitle={`Status: ${gas.statusPolusi}`}
           onClick={() => setActiveSubsystem('air-quality')}
         />
 
         {/* 2. Smart PJU */}
         <MetricCard
-          title="Penerangan Jalan (LDR)"
+          title="Penerangan Jalan"
           value={pju.pjuStatus}
-          statusText={`Kondisi ${pju.kondisi}`}
-          statusVariant={isGelap ? 'warning' : 'neutral'}
-          icon={<Lightbulb className="w-4 h-4" />}
-          footerText={`LDR: ${pju.ldrValue} (Ambang: 2000) • Pin 36`}
+          colorScheme={isGelap ? 'amber' : 'cyan'}
+          icon={<Lightbulb className="w-5 h-5" />}
+          subtitle={`Sensor Cahaya: ${pju.ldrValue} ADC`}
           onClick={() => setActiveSubsystem('lighting')}
         />
 
         {/* 3. Penyeberangan Jalan */}
         <MetricCard
-          title="Penyeberangan Pintar"
-          value={`LAMPU ${crossing.lampu}`}
-          statusText={crossing.statusRingkasan}
-          statusVariant={crossing.lampu === 'MERAH' ? 'danger' : 'success'}
-          icon={<Footprints className="w-4 h-4" />}
-          footerText="Dual Ultrasonik (Pin 32/34 & 33/35)"
+          title="Penyeberangan"
+          value={crossing.lampu}
+          unit={isMenyebrang ? `${crossing.countdownSeconds}s` : undefined}
+          colorScheme={isMenyebrang ? 'rose' : 'emerald'}
+          icon={<Footprints className="w-5 h-5" />}
+          subtitle={`Kanan: ${crossing.jarakKanan ? Math.round(crossing.jarakKanan) + ' cm' : '-'}`}
           onClick={() => setActiveSubsystem('pedestrian')}
         />
 
-        {/* 4. Kamera AI */}
+        {/* 4. Kamera Simpang */}
         <MetricCard
-          title="Lalu Lintas (Kamera AI)"
-          value={`${traffic.vehicleCount} Objek`}
-          statusText={traffic.statusText}
-          statusVariant={traffic.density >= 70 ? 'danger' : traffic.density >= 50 ? 'warning' : 'success'}
-          icon={<Navigation className="w-4 h-4" />}
-          footerText="Webcam Laptop Langsung"
+          title="Lalu Lintas"
+          value={traffic.vehicleCount}
+          unit="Objek"
+          colorScheme="cyan"
+          icon={<Navigation className="w-5 h-5" />}
+          subtitle={`Kepadatan: ${traffic.density}%`}
           onClick={() => setActiveSubsystem('traffic')}
         />
       </div>
 
-      {/* Schematic Layout & Hardware Status Panel */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* Left: Schematic Layout of Miniature Smart City */}
-        <div className="lg:col-span-7 rounded-xl bg-slate-900/60 border border-slate-800/80 p-4 flex flex-col justify-between">
+      {/* Subsystem Monitoring Grid & Live Actions */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Left: 4 Interactive Subsystem Cards */}
+        <div className="lg:col-span-7 neu-raised rounded-3xl p-6 border border-white/80 flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
-              <div>
-                <h3 className="text-xs font-semibold text-white uppercase tracking-wider">
-                  Layout Sensor Miniatur Maket
-                </h3>
-                <p className="text-[11px] text-slate-400 mt-0.5">
-                  Diagram posisi komponen sensor dan aktuator terhubung ke ESP32
-                </p>
-              </div>
-              <div className="text-[11px] font-mono text-slate-400 bg-slate-900 px-2.5 py-1 rounded border border-slate-800">
-                10 Pin GPIO & ADC
-              </div>
+            <div className="pb-3 border-b border-[#d3dde9] mb-4">
+              <h3 className="text-xs font-bold text-[#4e5d71] uppercase tracking-wider">
+                Status Pemantauan Kota
+              </h3>
             </div>
 
-            {/* Schematic Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 my-4">
-              {/* Pos 1: Kamera Traffic */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Traffic Subsystem Card */}
               <div
                 onClick={() => setActiveSubsystem('traffic')}
-                className="p-3.5 rounded-lg bg-slate-900/90 border border-slate-800 hover:border-slate-700 transition-colors cursor-pointer group"
+                className="neu-btn p-5 rounded-2xl cursor-pointer hover:border-[#bae6fd] transition-all flex flex-col justify-between min-h-[110px]"
               >
-                <div className="flex items-center justify-between mb-1.5">
-                  <div className="flex items-center gap-2 text-xs font-medium text-slate-300">
-                    <Video className="w-3.5 h-3.5 text-cyan-400" />
-                    <p>Kamera Simpang AI</p>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-[#19212d]">Kamera Simpang</span>
+                  <div className="w-8 h-8 rounded-xl neu-inset flex items-center justify-center text-[#0284c7]">
+                    <Video className="w-4 h-4" />
                   </div>
-                  <div className={`w-1.5 h-1.5 rounded-full ${isCameraConnected ? 'bg-emerald-400' : 'bg-slate-500'}`} />
                 </div>
-                <p className="text-xs text-slate-400">
-                  {isCameraConnected ? `${traffic.vehicleCount} objek terdeteksi • Kepadatan ${traffic.density}%` : 'Webcam Standby (Klik untuk buka)'}
-                </p>
+                <div className="mt-3">
+                  <p className="text-xl font-mono font-extrabold text-[#0284c7]">
+                    {traffic.vehicleCount} Objek
+                  </p>
+                  <p className="text-xs text-[#6e7e93] mt-0.5">Kepadatan {traffic.density}%</p>
+                </div>
               </div>
 
-              {/* Pos 2: Sensor Gas MQ */}
+              {/* Gas Subsystem Card */}
               <div
                 onClick={() => setActiveSubsystem('air-quality')}
-                className="p-3.5 rounded-lg bg-slate-900/90 border border-slate-800 hover:border-slate-700 transition-colors cursor-pointer group"
+                className="neu-btn p-5 rounded-2xl cursor-pointer hover:border-[#a7f3d0] transition-all flex flex-col justify-between min-h-[110px]"
               >
-                <div className="flex items-center justify-between mb-1.5">
-                  <div className="flex items-center gap-2 text-xs font-medium text-slate-300">
-                    <Wind className="w-3.5 h-3.5 text-amber-400" />
-                    <p>Pos Sensor Gas (MQ)</p>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-[#19212d]">Kualitas Udara</span>
+                  <div className={`w-8 h-8 rounded-xl neu-inset flex items-center justify-center ${isPolusiTinggi ? 'text-[#e11d48]' : 'text-[#059669]'}`}>
+                    <Wind className="w-4 h-4" />
                   </div>
-                  <div className={`w-1.5 h-1.5 rounded-full ${gas.statusPolusi === 'POLUSI TINGGI' ? 'bg-rose-500' : 'bg-emerald-400'}`} />
                 </div>
-                <p className="text-xs text-slate-400">
-                  Pin ADC 39 • Nilai: {gas.gasValue} ({gas.statusPolusi})
-                </p>
+                <div className="mt-3">
+                  <p className={`text-xl font-mono font-extrabold ${isPolusiTinggi ? 'text-[#e11d48]' : 'text-[#059669]'}`}>
+                    {gas.gasValue} ADC
+                  </p>
+                  <p className="text-xs text-[#6e7e93] mt-0.5">{gas.statusPolusi}</p>
+                </div>
               </div>
 
-              {/* Pos 3: Penyeberangan Zebra Cross */}
+              {/* Crossing Subsystem Card */}
               <div
                 onClick={() => setActiveSubsystem('pedestrian')}
-                className="p-3.5 rounded-lg bg-slate-900/90 border border-slate-800 hover:border-slate-700 transition-colors cursor-pointer group"
+                className="neu-btn p-5 rounded-2xl cursor-pointer hover:border-[#fecdd3] transition-all flex flex-col justify-between min-h-[110px]"
               >
-                <div className="flex items-center justify-between mb-1.5">
-                  <div className="flex items-center gap-2 text-xs font-medium text-slate-300">
-                    <Footprints className="w-3.5 h-3.5 text-cyan-400" />
-                    <p>Zebra Cross & Lampu Lalin</p>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-[#19212d]">Zebra Cross</span>
+                  <div className={`w-8 h-8 rounded-xl neu-inset flex items-center justify-center ${isMenyebrang ? 'text-[#e11d48]' : 'text-[#059669]'}`}>
+                    <Footprints className="w-4 h-4" />
                   </div>
-                  <div className={`w-1.5 h-1.5 rounded-full ${isMenyebrang ? 'bg-rose-500' : 'bg-emerald-400'}`} />
                 </div>
-                <p className="text-xs text-slate-400">
-                  Ultrasonik Kanan ({crossing.jarakKanan ? Math.round(crossing.jarakKanan) + 'cm' : '-'}) & Kiri ({crossing.jarakKiri ? Math.round(crossing.jarakKiri) + 'cm' : '-'})
-                </p>
+                <div className="mt-3">
+                  <p className={`text-xl font-mono font-extrabold ${isMenyebrang ? 'text-[#e11d48]' : 'text-[#059669]'}`}>
+                    {crossing.lampu}
+                  </p>
+                  <p className="text-xs text-[#6e7e93] mt-0.5">
+                    {isMenyebrang ? `Sisa ${crossing.countdownSeconds}s` : 'Kendaraan Jalan'}
+                  </p>
+                </div>
               </div>
 
-              {/* Pos 4: Tiang PJU LDR */}
+              {/* Lighting Subsystem Card */}
               <div
                 onClick={() => setActiveSubsystem('lighting')}
-                className="p-3.5 rounded-lg bg-slate-900/90 border border-slate-800 hover:border-slate-700 transition-colors cursor-pointer group"
+                className="neu-btn p-5 rounded-2xl cursor-pointer hover:border-[#fde68a] transition-all flex flex-col justify-between min-h-[110px]"
               >
-                <div className="flex items-center justify-between mb-1.5">
-                  <div className="flex items-center gap-2 text-xs font-medium text-slate-300">
-                    <Lightbulb className="w-3.5 h-3.5 text-amber-300" />
-                    <p>Tiang Smart PJU</p>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-[#19212d]">Lampu Jalan</span>
+                  <div className={`w-8 h-8 rounded-xl neu-inset flex items-center justify-center ${isGelap ? 'text-[#d97706]' : 'text-[#0284c7]'}`}>
+                    <Lightbulb className="w-4 h-4" />
                   </div>
-                  <div className={`w-1.5 h-1.5 rounded-full ${isGelap ? 'bg-amber-400' : 'bg-slate-500'}`} />
                 </div>
-                <p className="text-xs text-slate-400">
-                  LDR Pin 36 ({pju.ldrValue}) • LED Pin 25 & 26 ({pju.pjuStatus})
-                </p>
+                <div className="mt-3">
+                  <p className={`text-xl font-mono font-extrabold ${isGelap ? 'text-[#d97706]' : 'text-[#0284c7]'}`}>
+                    {pju.pjuStatus}
+                  </p>
+                  <p className="text-xs text-[#6e7e93] mt-0.5">{pju.kondisi}</p>
+                </div>
               </div>
             </div>
           </div>
 
           {/* Quick Actions */}
-          <div className="pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
-            <p className="text-slate-400 text-xs">Uji Coba Cepat Miniatur:</p>
-            <div className="flex items-center gap-2">
+          <div className="pt-5 border-t border-[#d3dde9] mt-6 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <span className="text-[#4e5d71] font-bold">Uji Coba Cepat:</span>
+            <div className="flex items-center gap-3">
               <button
+                type="button"
                 onClick={togglePjuDayNight}
-                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1.5 text-xs font-medium transition-colors cursor-pointer"
+                className="neu-btn px-4 py-2.5 rounded-xl font-bold text-[#19212d] flex items-center gap-2 min-h-[44px]"
               >
-                {isGelap ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
-                <p>Toggle PJU ({isGelap ? 'Siang' : 'Malam'})</p>
+                {isGelap ? <Sun className="w-4 h-4 text-[#d97706]" /> : <Moon className="w-4 h-4 text-[#4f46e5]" />}
+                <span>Ubah PJU ({isGelap ? 'Siang' : 'Malam'})</span>
               </button>
 
               <button
+                type="button"
                 onClick={() => triggerCrossingDetection('kanan')}
-                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1.5 text-xs font-medium transition-colors cursor-pointer"
+                className="neu-btn px-4 py-2.5 rounded-xl font-bold text-[#19212d] flex items-center gap-2 min-h-[44px]"
               >
-                <Footprints className="w-3.5 h-3.5" />
-                <p>Uji Penyeberangan</p>
+                <Footprints className="w-4 h-4 text-[#059669]" />
+                <span>Simulasi Penyeberangan</span>
               </button>
             </div>
           </div>
         </div>
 
-        {/* Right Side: Centralized Telemetry and Link to Unified Terminal */}
-        <div className="lg:col-span-5 rounded-xl bg-slate-900/60 border border-slate-800/80 p-4 flex flex-col justify-between">
+        {/* Right: Telemetry Overview & Quick Link */}
+        <div className="lg:col-span-5 neu-raised rounded-3xl p-6 border border-white/80 flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
+            <div className="pb-3 border-b border-[#d3dde9] mb-4 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Cpu className="w-4 h-4 text-cyan-400" />
-                <h3 className="text-xs font-semibold text-white uppercase tracking-wider">
-                  Status Telemetri & Aktuator
+                <Cpu className="w-4 h-4 text-[#4f46e5]" />
+                <h3 className="text-xs font-bold text-[#4e5d71] uppercase tracking-wider">
+                  Status Telemetri
                 </h3>
               </div>
-              <span className="font-mono text-[11px] text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
-                COM3 115200
-              </span>
+              <span className="font-mono text-xs text-[#059669] font-bold">LIVE</span>
             </div>
 
-            <div className="my-3 space-y-2.5 text-xs">
-              {/* Telemetry Status Item 1: LCD & Gas */}
-              <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-800/80 flex items-center justify-between">
+            <div className="space-y-3.5">
+              <div className="neu-inset p-4 rounded-2xl flex items-center justify-between">
                 <div>
-                  <p className="font-medium text-white">Monitor Hijau (LCD 1602 I2C)</p>
-                  <p className="text-[11px] text-slate-400 font-mono">
-                    Baris 1: &quot;{gas.lcdBaris1 || 'Selamat Datang'}&quot;
-                  </p>
+                  <p className="text-xs font-bold text-[#19212d]">Sensor Gas MQ</p>
+                  <p className="text-[11px] text-[#6e7e93] font-mono mt-0.5">ADC 39</p>
                 </div>
-                <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  0x27 Aktif
+                <span className="text-sm font-mono font-bold text-[#059669]">
+                  {gas.gasValue} ADC
                 </span>
               </div>
 
-              {/* Telemetry Status Item 2: PJU Lighting */}
-              <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-800/80 flex items-center justify-between">
+              <div className="neu-inset p-4 rounded-2xl flex items-center justify-between">
                 <div>
-                  <p className="font-medium text-white">Penerangan Jalan (LED 25 & 26)</p>
-                  <p className="text-[11px] text-slate-400 font-mono">
-                    Mode: {pju.pjuMode || 'AUTO'} • Status: {pju.pjuStatus}
-                  </p>
+                  <p className="text-xs font-bold text-[#19212d]">Sensor Cahaya LDR</p>
+                  <p className="text-[11px] text-[#6e7e93] font-mono mt-0.5">ADC 36</p>
                 </div>
-                <span
-                  className={`text-[10px] font-mono font-medium px-2 py-0.5 rounded border ${
-                    pju.ledPutih || pju.ledMerah
-                      ? 'bg-amber-500/10 text-amber-300 border-amber-500/20'
-                      : 'bg-slate-800 text-slate-400 border-slate-700'
-                  }`}
-                >
-                  {pju.pjuStatus}
+                <span className="text-sm font-mono font-bold text-[#d97706]">
+                  {pju.ldrValue} ADC
                 </span>
               </div>
 
-              {/* Telemetry Status Item 3: Crossing & Buzzer */}
-              <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-800/80 flex items-center justify-between">
+              <div className="neu-inset p-4 rounded-2xl flex items-center justify-between">
                 <div>
-                  <p className="font-medium text-white">Lampu Lalin & Buzzer (Pin 13)</p>
-                  <p className="text-[11px] text-slate-400 font-mono">
-                    Lampu {crossing.lampu} • Buzzer: {crossing.buzzer ? 'BUNYI' : 'STANDBY'}
-                  </p>
+                  <p className="text-xs font-bold text-[#19212d]">Sinyal Penyeberangan</p>
+                  <p className="text-[11px] text-[#6e7e93] font-mono mt-0.5">Dual Ultrasonik</p>
                 </div>
-                <span
-                  className={`text-[10px] font-mono font-medium px-2 py-0.5 rounded border ${
-                    crossing.lampu === 'MERAH'
-                      ? 'bg-rose-500/10 text-rose-300 border-rose-500/20'
-                      : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                  }`}
-                >
+                <span className="text-sm font-mono font-bold text-[#e11d48]">
                   {crossing.lampu}
                 </span>
               </div>
             </div>
           </div>
 
-          {/* Quick link button to dedicated Terminal in Notifikasi & Log */}
-          <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-mono">
-              <Activity className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Log terpusat di Notifikasi</span>
-            </div>
-
+          <div className="pt-5 border-t border-[#d3dde9] mt-6 flex items-center justify-between">
+            <span className="text-xs text-[#6e7e93] font-medium">Log aktivitas terpusat</span>
             <button
+              type="button"
               onClick={() => setActiveSubsystem('alerts')}
-              className="px-3 py-1.5 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/30 flex items-center gap-1.5 text-xs font-medium cursor-pointer transition-colors"
+              className="neu-btn px-4 py-2.5 rounded-xl text-xs font-bold text-[#4f46e5] flex items-center gap-2 min-h-[44px]"
             >
-              <Terminal className="w-3.5 h-3.5" />
+              <Terminal className="w-4 h-4" />
               <span>Buka Terminal Serial</span>
-              <ArrowRight className="w-3 h-3" />
+              <ArrowRight className="w-4 h-4" />
             </button>
           </div>
         </div>

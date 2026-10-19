@@ -36,19 +36,6 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
     }
   }, []);
 
-  const sendSerialDirect = async (cmdText: string) => {
-    if (writerRef.current) {
-      try {
-        const encoder = new TextEncoder();
-        await writerRef.current.write(encoder.encode(cmdText + '\n'));
-        return true;
-      } catch (err) {
-        console.error('Gagal menulis langsung ke USB:', err);
-      }
-    }
-    return false;
-  };
-
   const connectSerial = async () => {
     if (!('serial' in navigator)) {
       alert('Browser ini belum mendukung Web Serial API. Silakan gunakan Google Chrome atau Microsoft Edge.');
@@ -76,7 +63,7 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
 
       setLogs((prev) => [
         ...prev,
-        `[${new Date().toLocaleTimeString('id-ID')}] [USB SERIAL] Terhubung ke ESP32 (115200 baud). Kontrol dua arah aktif!`,
+        `[${new Date().toLocaleTimeString('id-ID')}] [USB SERIAL] Terhubung ke ESP32 (115200 baud). Kontrol dua arah aktif.`,
       ]);
 
       const textDecoder = new TextDecoderStream();
@@ -96,7 +83,6 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
             const trimmed = line.trim();
             if (!trimmed) continue;
 
-            // Masukkan ke log tampilan konsol
             setLogs((prev) => [...prev.slice(-150), trimmed]);
 
             // Parsing data telemetri jika ada format JSON
@@ -187,9 +173,9 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
         `[FIRMWARE] Firmware MicroPython main.py telah terpasang di memori flash ESP32.`,
         `--------------------------------------------------------------------------------`,
         `Petunjuk Koneksi ke Dashboard:`,
-        `1. Klik tombol hijau [Sambungkan USB] di pojok kanan atas konsol ini.`,
+        `1. Klik tombol [Sambungkan USB] di pojok kanan atas konsol ini.`,
         `2. Pilih perangkat "USB-SERIAL CH340 (COM3)" dan klik Sambungkan.`,
-        `3. Data sensor Gas MQ, Ultrasonik, dan LDR akan otomatis mengalir real-time!`,
+        `3. Data sensor Gas MQ, Ultrasonik, dan LDR akan otomatis mengalir real-time.`,
         `--------------------------------------------------------------------------------`,
         `Alternatif Background Bridge:`,
         `Jalankan skrip: powershell firmware/bridge_serial_to_dashboard.ps1`,
@@ -201,7 +187,7 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
         if (prev.some((l) => l.includes('[CONNECTED]'))) return prev;
         return [
           ...prev,
-          `[${timestamp}] [CONNECTED] ESP32 aktif. Menerima telemetri real-time...`,
+          `[${timestamp}] [CONNECTED] ESP32 aktif. Menerima telemetri real-time.`,
         ];
       });
     }
@@ -255,77 +241,81 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
   };
 
   return (
-    <div className="rounded-xl bg-[#080D18] border border-slate-800/80 overflow-hidden flex flex-col">
+    <div className="neu-raised rounded-2xl border border-[#dfdbd2] p-5 flex flex-col gap-4">
       {/* Console Header */}
-      <div className="px-3.5 py-2.5 bg-slate-950/80 border-b border-slate-800/80 flex items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center gap-2">
-          <Terminal className="w-3.5 h-3.5 text-slate-400" />
-          <h4 className="text-xs font-mono font-medium text-slate-200">{title}</h4>
-          <div
-            className={`px-2 py-0.5 rounded text-[10px] font-mono font-medium border ${
+      <div className="flex items-center justify-between flex-wrap gap-3 pb-3 border-b border-[#dfdbd2]">
+        <div className="flex items-center gap-2.5">
+          <Terminal className="w-4 h-4 text-[#1d6a47]" />
+          <h4 className="text-xs font-mono font-bold text-[#25282b]">{title}</h4>
+          <span
+            className={`px-2.5 py-0.5 rounded-md text-[10px] font-mono font-bold border ${
               isHardwareConnected || isSerialConnected
-                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25'
-                : 'bg-slate-800/40 text-slate-400 border-slate-700/50'
+                ? 'bg-[#e4e9e4] text-[#1d6a47] border-[#cbd5cb]'
+                : 'bg-[#dedad0] text-[#4c5156] border-[#cfcac0]'
             }`}
           >
-            {isHardwareConnected || isSerialConnected ? 'Online (115200)' : 'Standby (COM3)'}
-          </div>
+            {isHardwareConnected || isSerialConnected ? 'Online (115200)' : 'Siaga (COM3)'}
+          </span>
         </div>
 
-        <div className="flex items-center gap-1.5 text-xs flex-wrap">
+        <div className="flex items-center gap-2 text-xs flex-wrap">
           {/* Web Serial Direct USB Connect Button */}
           {isWebSerialSupported && (
             <button
+              type="button"
               onClick={isSerialConnected ? disconnectSerial : connectSerial}
               disabled={isConnecting}
-              className={`px-2.5 py-1 rounded text-[11px] font-mono font-medium transition-colors flex items-center gap-1.5 border cursor-pointer ${
+              className={`neu-btn px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-2 min-h-[44px] focus-visible:outline-2 focus-visible:outline-[#1d6a47] ${
                 isSerialConnected
-                  ? 'bg-rose-500/10 text-rose-300 border-rose-500/30 hover:bg-rose-500/20'
-                  : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30'
+                  ? 'text-[#a12d1f]'
+                  : 'text-[#1d6a47]'
               }`}
               title={isSerialConnected ? 'Putuskan koneksi USB serial' : 'Buka dialog sambung USB ESP32'}
             >
-              {isSerialConnected ? <Unplug className="w-3 h-3" /> : <Usb className="w-3 h-3" />}
+              {isSerialConnected ? <Unplug className="w-4 h-4" /> : <Usb className="w-4 h-4" />}
               <span>{isConnecting ? 'Menghubungkan...' : isSerialConnected ? 'Putuskan USB' : 'Sambungkan USB'}</span>
             </button>
           )}
 
           <button
+            type="button"
             onClick={() => setAutoScroll(!autoScroll)}
-            className={`px-2 py-1 rounded text-[11px] font-mono transition-colors flex items-center gap-1 cursor-pointer ${
-              autoScroll ? 'bg-slate-800 text-cyan-300' : 'text-slate-400 hover:text-white'
+            className={`neu-btn px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 min-h-[44px] focus-visible:outline-2 focus-visible:outline-[#1d6a47] ${
+              autoScroll ? 'neu-btn-active text-[#1d6a47]' : 'text-[#4c5156]'
             }`}
             title="Auto scroll"
           >
-            <ArrowDownCircle className="w-3 h-3" />
-            <span className="hidden sm:inline">Scroll</span>
+            <ArrowDownCircle className="w-4 h-4" />
+            <span className="hidden sm:inline">Gulir</span>
           </button>
 
           <button
+            type="button"
             onClick={handleCopy}
-            className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+            className="neu-btn p-2 rounded-xl text-[#4c5156] hover:text-[#25282b] min-h-[44px] min-w-[44px] flex items-center justify-center focus-visible:outline-2 focus-visible:outline-[#1d6a47]"
             title="Salin Log"
           >
-            {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+            {copied ? <Check className="w-4 h-4 text-[#1d6a47]" /> : <Copy className="w-4 h-4" />}
           </button>
 
           <button
+            type="button"
             onClick={handleClear}
-            className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition-colors cursor-pointer"
+            className="neu-btn p-2 rounded-xl text-[#4c5156] hover:text-[#a12d1f] min-h-[44px] min-w-[44px] flex items-center justify-center focus-visible:outline-2 focus-visible:outline-[#1d6a47]"
             title="Bersihkan"
           >
-            <Trash2 className="w-3.5 h-3.5" />
+            <Trash2 className="w-4 h-4" />
           </button>
         </div>
       </div>
 
-      {/* Terminal Content */}
+      {/* Terminal Content Screen */}
       <div 
         ref={consoleContainerRef}
-        className={`p-3.5 font-mono text-[11px] leading-relaxed overflow-y-auto select-text ${maxHeight} text-slate-300 space-y-0.5`}
+        className={`neu-inset p-4 rounded-xl font-mono text-[11px] leading-relaxed overflow-y-auto select-text ${maxHeight} bg-[#1e2124] text-[#e8e4dc] space-y-1 border border-[#dfdbd2]`}
       >
         {logs.length === 0 ? (
-          <p className="text-slate-500 italic py-2">Tidak ada log.</p>
+          <p className="text-[#7a8188] italic py-2">Tidak ada log.</p>
         ) : (
           logs.map((line, idx) => {
             const isHeader = line.includes('===') || line.includes('SMART CITY');
@@ -339,16 +329,16 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
                 key={idx}
                 className={
                   isOffline
-                    ? 'text-slate-400'
+                    ? 'text-[#9ea4aa]'
                     : isHeader
-                    ? 'text-cyan-400 font-semibold'
+                    ? 'text-[#5ec293] font-bold'
                     : isAlert
-                    ? 'text-rose-400 font-medium'
+                    ? 'text-[#f87171] font-semibold'
                     : isWarning
-                    ? 'text-amber-300 font-medium'
+                    ? 'text-[#fbbf24] font-semibold'
                     : isGood
-                    ? 'text-emerald-400'
-                    : 'text-slate-300'
+                    ? 'text-[#34d399]'
+                    : 'text-[#e8e4dc]'
                 }
               >
                 {line}
@@ -360,42 +350,48 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
       </div>
 
       {/* Interactive Command Bar */}
-      <div className="px-3.5 py-2 bg-slate-950/90 border-t border-slate-900/90 flex flex-col gap-2">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-[10px] font-mono font-semibold text-slate-400 uppercase">Kontrol Cepat:</span>
+      <div className="flex flex-col gap-3 pt-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[10px] font-mono font-bold text-[#4c5156] uppercase">Kontrol Cepat:</span>
           <button
+            type="button"
             onClick={() => handleDispatchCommand('CMD:PJU_ON')}
-            className="px-2 py-0.5 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[10px] font-mono cursor-pointer transition-colors"
+            className="neu-btn px-3 py-1.5 rounded-lg text-xs font-semibold text-[#a12d1f] min-h-[44px] focus-visible:outline-2 focus-visible:outline-[#1d6a47]"
           >
             PJU ON
           </button>
           <button
+            type="button"
             onClick={() => handleDispatchCommand('CMD:PJU_OFF')}
-            className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-[10px] font-mono cursor-pointer transition-colors"
+            className="neu-btn px-3 py-1.5 rounded-lg text-xs font-semibold text-[#4c5156] min-h-[44px] focus-visible:outline-2 focus-visible:outline-[#1d6a47]"
           >
             PJU OFF
           </button>
           <button
+            type="button"
             onClick={() => handleDispatchCommand('CMD:PJU_AUTO')}
-            className="px-2 py-0.5 rounded bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-[10px] font-mono cursor-pointer transition-colors"
+            className="neu-btn px-3 py-1.5 rounded-lg text-xs font-semibold text-[#1d6a47] min-h-[44px] focus-visible:outline-2 focus-visible:outline-[#1d6a47]"
           >
             PJU Auto
           </button>
           <button
+            type="button"
             onClick={() => handleDispatchCommand('CMD:CROSSING_TRIGGER')}
-            className="px-2 py-0.5 rounded bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-mono cursor-pointer transition-colors"
+            className="neu-btn px-3 py-1.5 rounded-lg text-xs font-semibold text-[#9c4c1a] min-h-[44px] focus-visible:outline-2 focus-visible:outline-[#1d6a47]"
           >
             Picu Zebra Cross
           </button>
           <button
+            type="button"
             onClick={() => handleDispatchCommand('CMD:CROSSING_RESET')}
-            className="px-2 py-0.5 rounded bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-mono cursor-pointer transition-colors"
+            className="neu-btn px-3 py-1.5 rounded-lg text-xs font-semibold text-[#1d6a47] min-h-[44px] focus-visible:outline-2 focus-visible:outline-[#1d6a47]"
           >
             Reset Aman
           </button>
           <button
+            type="button"
             onClick={() => handleDispatchCommand('CMD:ALARM_TEST')}
-            className="px-2 py-0.5 rounded bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[10px] font-mono cursor-pointer transition-colors"
+            className="neu-btn px-3 py-1.5 rounded-lg text-xs font-semibold text-[#25282b] min-h-[44px] focus-visible:outline-2 focus-visible:outline-[#1d6a47]"
           >
             Uji Buzzer
           </button>
@@ -409,27 +405,27 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
               setCustomCommand('');
             }
           }}
-          className="flex items-center gap-1.5"
+          className="flex items-center gap-2"
         >
           <input
             type="text"
             placeholder="Ketik perintah (contoh: CMD:PJU_ON, CMD:CROSSING_TRIGGER)..."
             value={customCommand}
             onChange={(e) => setCustomCommand(e.target.value)}
-            className="flex-1 bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-[11px] font-mono text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50"
+            className="flex-1 neu-inset rounded-xl px-4 py-2.5 text-xs font-mono text-[#25282b] placeholder-[#7a8188] border border-[#dfdbd2] focus:outline-none focus:border-[#1d6a47] min-h-[44px]"
           />
           <button
             type="submit"
-            className="px-2.5 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-[10px] font-mono font-medium flex items-center gap-1 cursor-pointer transition-colors"
+            className="neu-btn px-4 py-2.5 rounded-xl text-xs font-bold text-[#1d6a47] flex items-center gap-1.5 min-h-[44px] focus-visible:outline-2 focus-visible:outline-[#1d6a47]"
           >
-            <Send className="w-3 h-3" />
+            <Send className="w-3.5 h-3.5" />
             <span>Kirim</span>
           </button>
         </form>
       </div>
 
       {/* Console Footer */}
-      <div className="px-3.5 py-1.5 bg-slate-950/60 border-t border-slate-900 text-[10px] font-mono text-slate-500 flex items-center justify-between">
+      <div className="pt-2 border-t border-[#dfdbd2] text-[10px] font-mono text-[#4c5156] flex items-center justify-between">
         <p>{isHardwareConnected ? 'Serial Aktif (Thonny)' : 'Port TTY Menunggu Koneksi'}</p>
         <p>{logs.length} Baris</p>
       </div>

@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Smart City : Autonomous IoT Command Center",
-  description: "Virtual Command Center untuk memantau kondisi kota real-time, mengontrol perangkat IoT ESP32, dan menjalankan otomasi Smart City.",
+  title: "UrbanPulse: Miniatur Kota Cerdas IoT",
+  description: "Pusat Kendali Miniatur Kota Cerdas berbasis ESP32 dan Kamera Pemantau.",
 };
 
 export default function RootLayout({
@@ -23,9 +23,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="id" className="dark">
+    <html lang="id">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[#070B14] text-slate-100 min-h-screen`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[#e6ecf5] text-[#19212d] min-h-screen`}
       >
         {children}
       </body>

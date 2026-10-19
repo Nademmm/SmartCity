@@ -5,19 +5,14 @@ import { useSmartCity } from '@/context/SmartCityContext';
 import { MetricCard } from '@/components/common/MetricCard';
 import {
   Wind,
-  ShieldCheck,
   AlertTriangle,
-  CheckCircle2,
-  Info,
-  Terminal,
-  ArrowRight,
-  Cpu,
   Sliders,
+  Cpu,
   RotateCcw,
 } from 'lucide-react';
 
 export const AirQualityView: React.FC = () => {
-  const { gas, controlGasManual, testBuzzerAlarm, isHardwareConnected, setActiveSubsystem } = useSmartCity();
+  const { gas, controlGasManual, testBuzzerAlarm, isHardwareConnected } = useSmartCity();
 
   const [localSliderVal, setLocalSliderVal] = useState<number>(gas.gasValue);
 
@@ -25,403 +20,237 @@ export const AirQualityView: React.FC = () => {
     setLocalSliderVal(gas.gasValue);
   }, [gas.gasValue]);
 
-  const isTinggi = gas.statusPolusi === 'POLUSI TINGGI';
-  const isSedang = gas.statusPolusi === 'POLUSI SEDANG';
+  const isTinggi = gas.gasValue >= 1500;
+  const isSedang = gas.gasValue >= 1000 && gas.gasValue < 1500;
   const isManual = gas.gasMode === 'MANUAL';
 
-  return (
-    <div className="space-y-4">
-      {/* Offline Hardware Banner */}
-      {!isHardwareConnected && (
-        <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/80 flex items-center justify-between text-xs text-slate-300">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-slate-500" />
-            <p>
-              Perangkat ESP32 belum terhubung. Nilai sensor gas saat ini berada dalam mode simulasi interaktif.
-            </p>
-          </div>
-          <div className="font-mono text-[11px] text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800 shrink-0">
-            Standby
-          </div>
-        </div>
-      )}
+  const activeColor = isTinggi ? '#e11d48' : isSedang ? '#d97706' : '#059669';
+  const activeGlow = isTinggi ? 'neu-glow-rose' : isSedang ? 'neu-glow-amber' : 'neu-glow-emerald';
 
-      {/* Status Warning Banner (Sedang & Tinggi) */}
-      {(isTinggi || isSedang) && (
-        <div
-          className={`p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs ${
-            isTinggi
-              ? 'bg-rose-950/30 border-rose-500/40'
-              : 'bg-amber-950/30 border-amber-500/40'
-          }`}
-        >
-          <div className="flex items-center gap-2.5">
-            <AlertTriangle
-              className={`w-4 h-4 shrink-0 ${isTinggi ? 'text-rose-400' : 'text-amber-400'}`}
-            />
+  const percentage = Math.min(100, Math.round((gas.gasValue / 2500) * 100));
+
+  return (
+    <div className="space-y-6">
+      {/* High Pollution Warning Strip */}
+      {isTinggi && (
+        <div className="rounded-2xl p-4 bg-[#ffe4e6] border border-[#fecdd3] text-[#e11d48] flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 shrink-0 text-[#e11d48]" />
             <div>
-              <p className="font-semibold text-white">
-                {isTinggi ? 'Peringatan: Polusi Udara Tinggi' : 'Pemberitahuan: Polusi Udara Sedang'} ({gas.gasValue} ADC)
-              </p>
-              <p className="text-slate-400">
-                {isTinggi
-                  ? 'Nilai gas melebihi ambang 1500 ADC. Alarm darurat aktif.'
-                  : 'Nilai gas terdeteksi antara 1000 sampai 1499 ADC.'}
-              </p>
+              <p className="font-bold text-sm">Konsentrasi Gas Tinggi ({gas.gasValue} ADC)</p>
+              <p className="text-xs opacity-90">Nilai sensor melampaui batas aman 1500 ADC.</p>
             </div>
           </div>
-
-          <div className="flex items-center gap-2 self-start sm:self-auto">
-            <button
-              onClick={() => controlGasManual('BERSIH')}
-              className="px-3 py-1.5 rounded-lg bg-emerald-600/30 hover:bg-emerald-600/40 text-emerald-200 border border-emerald-500/40 font-medium text-xs cursor-pointer transition-colors"
-            >
-              Reset ke Bersih
-            </button>
-            <button
-              onClick={() => controlGasManual('AUTO')}
-              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium text-xs cursor-pointer transition-colors"
-            >
-              Sensor Fisik (Auto)
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => controlGasManual('BERSIH')}
+            className="neu-btn px-4 py-2 rounded-xl text-xs font-bold text-[#059669] min-h-[44px]"
+          >
+            Reset Bersih
+          </button>
         </div>
       )}
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      {/* KPI Cards: Pure Minimalist Numbers */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard
-          title="Nilai Sensor Gas (MQ)"
+          title="Sensor Gas MQ"
           value={gas.gasValue}
           unit="ADC"
-          statusText={gas.statusPolusi}
-          statusVariant={isTinggi ? 'danger' : isSedang ? 'warning' : 'success'}
-          icon={<Wind className="w-4 h-4" />}
-          footerText={`ADC Pin ${gas.pinGas} • Mode: ${gas.gasMode || 'AUTO'}`}
+          colorScheme={isTinggi ? 'rose' : isSedang ? 'amber' : 'emerald'}
+          icon={<Wind className="w-5 h-5" />}
+          subtitle="Pin ADC 39 ESP32"
         />
 
         <MetricCard
-          title="Status Kategori Udara"
-          value={gas.statusPolusi}
-          statusText={
-            gas.gasValue < 1000
-              ? 'Aman (< 1000)'
-              : gas.gasValue < 1500
-              ? 'Waspada (1000-1499)'
-              : 'Bahaya (>= 1500)'
-          }
-          statusVariant={isTinggi ? 'danger' : isSedang ? 'warning' : 'success'}
-          icon={<ShieldCheck className="w-4 h-4" />}
-          footerText="Klasifikasi Program MicroPython"
-        />
-
-        <MetricCard
-          title="Ambang Udara Bersih"
-          value="< 1000"
+          title="Batas Aman"
+          value="1000"
           unit="ADC"
-          statusText="Batas Aman"
-          statusVariant="success"
-          icon={<CheckCircle2 className="w-4 h-4" />}
-          footerText="Threshold Level 1"
+          colorScheme="emerald"
+          icon={<Wind className="w-5 h-5" />}
+          subtitle="Ambang Batas Bawah"
         />
 
         <MetricCard
-          title="Ambang Polusi Tinggi"
-          value=">= 1500"
+          title="Batas Bahaya"
+          value="1500"
           unit="ADC"
-          statusText="Batas Alarm"
-          statusVariant="danger"
-          icon={<AlertTriangle className="w-4 h-4" />}
-          footerText="Threshold Level 2"
+          colorScheme="rose"
+          icon={<AlertTriangle className="w-5 h-5" />}
+          subtitle="Ambang Batas Alarm"
+        />
+
+        <MetricCard
+          title="Mode Operasi"
+          value={gas.gasMode || 'AUTO'}
+          colorScheme="indigo"
+          icon={<Cpu className="w-5 h-5" />}
+          subtitle={isManual ? 'Simulasi Manual' : 'Sensor Fisik Langsung'}
         />
       </div>
 
-      {/* Gauge and Hardware Display */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* Gauge & Control Card */}
-        <div className="lg:col-span-6 rounded-xl bg-slate-900/60 border border-slate-800/80 p-4 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
-              <h3 className="text-xs font-semibold text-white uppercase tracking-wider">
-                Kontrol & Pembacaan Sensor Gas
-              </h3>
-              <span className={`text-[11px] font-mono px-2 py-0.5 rounded border ${
-                isManual 
-                  ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30' 
-                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-              }`}>
-                {isManual ? 'Simulasi Manual (Web)' : 'Sensor Fisik (Pin 39)'}
+      {/* Centerpiece Minimalist Neumorphic Monitoring Dial & Control */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Large Visual Gas Dial */}
+        <div className={`lg:col-span-7 neu-raised ${activeGlow} rounded-3xl p-8 border border-white/80 flex flex-col items-center justify-center transition-all duration-300`}>
+          <h2 className="text-xs font-bold text-[#4e5d71] uppercase tracking-wider mb-6">
+            Tingkat Konsentrasi Gas
+          </h2>
+
+          {/* Circular Neumorphic Well */}
+          <div className="relative w-56 h-56 rounded-full neu-inset flex items-center justify-center p-4">
+            {/* SVG Progress Arc */}
+            <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+              <circle
+                cx="50"
+                cy="50"
+                r="40"
+                fill="none"
+                stroke="#cbd5e1"
+                strokeWidth="7"
+                strokeLinecap="round"
+              />
+              <circle
+                cx="50"
+                cy="50"
+                r="40"
+                fill="none"
+                stroke={activeColor}
+                strokeWidth="7"
+                strokeDasharray="251.2"
+                strokeDashoffset={251.2 - (251.2 * percentage) / 100}
+                strokeLinecap="round"
+                className="transition-all duration-500 ease-out"
+              />
+            </svg>
+
+            {/* Inner Center Info */}
+            <div className="absolute inset-7 rounded-full neu-raised flex flex-col items-center justify-center border border-white/90">
+              <span className="text-4xl font-extrabold font-mono tracking-tight" style={{ color: activeColor }}>
+                {gas.gasValue}
               </span>
+              <span className="text-xs font-bold uppercase mt-1 tracking-wider" style={{ color: activeColor }}>
+                {gas.statusPolusi}
+              </span>
+              <span className="text-[11px] text-[#6e7e93] font-mono mt-0.5">ADC</span>
             </div>
+          </div>
 
-            {/* Mode Switcher Buttons */}
-            <div className="grid grid-cols-2 gap-2 mt-3 mb-2 p-1 rounded-lg bg-slate-950/80 border border-slate-800">
-              <button
-                onClick={() => controlGasManual('AUTO')}
-                className={`py-2 px-3 rounded-md text-xs font-medium flex items-center justify-center gap-1.5 cursor-pointer transition-colors ${
-                  !isManual
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <Cpu className="w-3.5 h-3.5" />
-                <span>Sensor Fisik (Auto)</span>
-              </button>
+          <div className="w-full max-w-sm mt-6 flex justify-between text-xs font-mono text-[#6e7e93]">
+            <span>0</span>
+            <span className="font-semibold text-[#059669]">1000</span>
+            <span className="font-semibold text-[#d97706]">1500</span>
+            <span>2500+</span>
+          </div>
+        </div>
 
-              <button
-                onClick={() => controlGasManual(localSliderVal)}
-                className={`py-2 px-3 rounded-md text-xs font-medium flex items-center justify-center gap-1.5 cursor-pointer transition-colors ${
-                  isManual
-                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <Sliders className="w-3.5 h-3.5" />
-                <span>Simulasi Manual</span>
-              </button>
-            </div>
-
-            {/* Value Display */}
-            <div className="my-3 p-4 rounded-xl bg-slate-950/80 border border-slate-800/80 flex flex-col items-center justify-center">
-              <div
-                className="w-16 h-16 rounded-full border-2 flex items-center justify-center transition-colors"
-                style={{
-                  borderColor: isTinggi ? '#F43F5E' : isSedang ? '#F59E0B' : '#10B981',
-                }}
-              >
-                <Wind
-                  className="w-7 h-7"
-                  style={{
-                    color: isTinggi ? '#FB7185' : isSedang ? '#FBBF24' : '#34D399',
-                  }}
-                />
-              </div>
-
-              <div className="mt-2.5 text-center">
-                <p className="text-3xl font-bold text-white font-mono">{gas.gasValue}</p>
-                <p
-                  className="text-xs font-semibold uppercase mt-0.5"
-                  style={{ color: isTinggi ? '#FB7185' : isSedang ? '#FBBF24' : '#34D399' }}
+        {/* Right: Tactile Minimalist Controls */}
+        <div className="lg:col-span-5 neu-raised rounded-3xl p-6 border border-white/80 flex flex-col justify-between">
+          <div className="space-y-5">
+            <div className="flex items-center justify-between pb-3 border-b border-[#d3dde9]">
+              <h3 className="text-xs font-bold text-[#4e5d71] uppercase tracking-wider">
+                Kendali Sensor
+              </h3>
+              {isManual && (
+                <button
+                  type="button"
+                  onClick={() => controlGasManual('AUTO')}
+                  className="text-xs text-[#0284c7] font-bold hover:underline flex items-center gap-1.5 min-h-[44px]"
                 >
-                  {gas.statusPolusi}
-                </p>
-                <p className="text-[10px] text-slate-400 mt-0.5">
-                  {isManual ? 'Nilai diset secara manual dari perangkat' : 'Membaca langsung dari pin ADC 39 ESP32'}
-                </p>
-              </div>
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Kembali ke Auto</span>
+                </button>
+              )}
             </div>
 
-            {/* Slider with Commit on pointer/touch end */}
-            <div className="p-3.5 rounded-lg bg-slate-900 border border-slate-800 space-y-2">
-              <div className="flex justify-between text-xs text-slate-300 font-medium">
-                <p>Pengaturan Manual Nilai Gas:</p>
-                <p className="font-mono text-cyan-400 font-bold">{localSliderVal} ADC</p>
+            {/* Mode Switcher */}
+            <div className="grid grid-cols-2 gap-2.5 p-1.5 neu-inset rounded-2xl">
+              <button
+                type="button"
+                onClick={() => controlGasManual('AUTO')}
+                className={`py-3 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all min-h-[44px] ${
+                  !isManual ? 'neu-btn-active text-[#059669]' : 'text-[#4e5d71]'
+                }`}
+              >
+                <Cpu className="w-4 h-4" />
+                <span>Otomatis</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => controlGasManual(localSliderVal)}
+                className={`py-3 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all min-h-[44px] ${
+                  isManual ? 'neu-btn-active text-[#0284c7]' : 'text-[#4e5d71]'
+                }`}
+              >
+                <Sliders className="w-4 h-4" />
+                <span>Manual</span>
+              </button>
+            </div>
+
+            {/* Slider */}
+            <div className="p-4 neu-inset rounded-2xl space-y-3">
+              <div className="flex justify-between text-xs font-semibold text-[#19212d]">
+                <span>Nilai Simulasi:</span>
+                <span className="font-mono text-sm font-bold text-[#0284c7]">{localSliderVal} ADC</span>
               </div>
               <input
                 type="range"
                 min="0"
-                max="4095"
+                max="3000"
                 value={localSliderVal}
                 onChange={(e) => setLocalSliderVal(Number(e.target.value))}
                 onPointerUp={() => controlGasManual(localSliderVal)}
                 onTouchEnd={() => controlGasManual(localSliderVal)}
                 onKeyUp={() => controlGasManual(localSliderVal)}
-                className="w-full accent-cyan-400 cursor-pointer h-2 bg-slate-800 rounded-lg"
+                className="neu-range"
+                aria-label="Atur Nilai Gas Manual"
               />
-              <div className="flex justify-between text-[10px] text-slate-400 font-mono">
-                <p className="text-emerald-400">&lt; 1000 (Bersih)</p>
-                <p className="text-amber-400">1000 - 1499 (Sedang)</p>
-                <p className="text-rose-400">&gt;= 1500 (Tinggi)</p>
-              </div>
             </div>
 
-            {/* Presets */}
-            <div className="mt-3 space-y-1.5">
-              <p className="text-[11px] font-medium text-slate-400">Uji Coba Cepat Preset Ambang Batas:</p>
-              <div className="grid grid-cols-3 gap-2">
+            {/* Preset Buttons */}
+            <div className="space-y-2">
+              <p className="text-xs font-bold text-[#4e5d71]">Preset Cepat:</p>
+              <div className="grid grid-cols-3 gap-2.5">
                 <button
+                  type="button"
                   onClick={() => controlGasManual('BERSIH')}
-                  className={`py-2 px-2 rounded-lg border text-xs font-medium cursor-pointer transition-colors ${
-                    isManual && gas.gasValue === 650
-                      ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
-                      : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                  className={`neu-btn py-3 px-2 rounded-xl text-xs font-bold min-h-[44px] ${
+                    isManual && gas.gasValue === 650 ? 'neu-btn-active text-[#059669]' : 'text-[#19212d]'
                   }`}
                 >
-                  Bersih (650)
+                  Bersih
                 </button>
                 <button
+                  type="button"
                   onClick={() => controlGasManual('SEDANG')}
-                  className={`py-2 px-2 rounded-lg border text-xs font-medium cursor-pointer transition-colors ${
-                    isManual && gas.gasValue === 1250
-                      ? 'bg-amber-500/20 border-amber-500 text-amber-300'
-                      : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                  className={`neu-btn py-3 px-2 rounded-xl text-xs font-bold min-h-[44px] ${
+                    isManual && gas.gasValue === 1250 ? 'neu-btn-active text-[#d97706]' : 'text-[#19212d]'
                   }`}
                 >
-                  Sedang (1250)
+                  Sedang
                 </button>
                 <button
+                  type="button"
                   onClick={() => controlGasManual('BAHAYA')}
-                  className={`py-2 px-2 rounded-lg border text-xs font-medium cursor-pointer transition-colors ${
-                    isManual && gas.gasValue === 2100
-                      ? 'bg-rose-500/20 border-rose-500 text-rose-300'
-                      : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                  className={`neu-btn py-3 px-2 rounded-xl text-xs font-bold min-h-[44px] ${
+                    isManual && gas.gasValue === 2100 ? 'neu-btn-active text-[#e11d48]' : 'text-[#19212d]'
                   }`}
                 >
-                  Tinggi (2100)
-                </button>
-              </div>
-
-              <div className="pt-2">
-                <button
-                  onClick={testBuzzerAlarm}
-                  className="w-full py-2.5 px-3 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-xs font-medium transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <AlertTriangle className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>Uji Alarm Buzzer Fisik (ESP32 Pin 13)</span>
+                  Tinggi
                 </button>
               </div>
             </div>
           </div>
 
-          <div className="mt-4 pt-3 border-t border-slate-800/80 text-[11px] text-slate-400 flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <Info className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-              <p>Perintah kontrol otomatis disinkronkan ke ESP32 dan perangkat lain.</p>
-            </div>
-            {isManual && (
-              <button
-                onClick={() => controlGasManual('AUTO')}
-                className="text-[10px] text-cyan-400 hover:underline flex items-center gap-1 cursor-pointer"
-              >
-                <RotateCcw className="w-3 h-3" />
-                <span>Reset Otomatis</span>
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Right Card: Monitor Hijau LCD 16x2, LED Fisik & Tabel Logika */}
-        <div className="lg:col-span-6 flex flex-col justify-between rounded-xl bg-slate-900/60 border border-slate-800/80 p-4">
-          <div className="space-y-4">
-            {/* Monitor Hijau (LCD 16x2 I2C) & 2 LED Tambahan */}
-            <div>
-              <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
-                <div className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <h3 className="text-xs font-semibold text-white uppercase tracking-wider">
-                    Hardware Output: Monitor Hijau & 2 LED
-                  </h3>
-                </div>
-                <span className="text-[11px] font-mono text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/50">
-                  I2C: Pin 21 (SDA) / 22 (SCL)
-                </span>
-              </div>
-
-              {/* Simulasi Layar LCD 16x2 Green Backlight */}
-              <div className="my-3 p-3.5 rounded-lg bg-emerald-950/80 border-2 border-emerald-700/60 shadow-inner flex flex-col justify-center relative overflow-hidden">
-                <div className="absolute top-1 right-2 text-[9px] font-mono text-emerald-400/70 tracking-widest uppercase">
-                  LCD 1602 I2C (0x27)
-                </div>
-                <div className="font-mono text-sm sm:text-base font-black text-emerald-300 tracking-wider select-none bg-emerald-900/40 p-2.5 rounded border border-emerald-800/40 shadow-sm space-y-1">
-                  <p className="truncate">
-                    {gas.lcdBaris1 || (isTinggi ? 'STATUS: BAHAYA!' : isSedang ? 'STATUS: WASPADA' : 'Selamat Datang')}
-                  </p>
-                  <p className="truncate">
-                    {gas.lcdBaris2 || (isTinggi ? 'Polusi: TINGGI' : isSedang ? `Gas: ${gas.gasValue} Sedang` : 'Di Kota Pintar')}
-                  </p>
-                </div>
-              </div>
-
-              {/* Status 2 LED Tambahan Fisik */}
-              <div className="grid grid-cols-2 gap-2.5">
-                {/* LED 1: Peringatan Polusi (Pin 18) */}
-                <div
-                  className={`p-2.5 rounded-lg border transition-all flex items-center justify-between ${
-                    gas.ledPolusi || isTinggi
-                      ? 'bg-rose-950/40 border-rose-500/60 text-rose-200 shadow-sm shadow-rose-950'
-                      : 'bg-slate-950/60 border-slate-800 text-slate-500'
-                  }`}
-                >
-                  <div className="space-y-0.5">
-                    <p className="text-[11px] font-semibold">LED Peringatan</p>
-                    <p className="text-[10px] font-mono opacity-80">GPIO Pin 18</p>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <div
-                      className={`w-3.5 h-3.5 rounded-full border ${
-                        gas.ledPolusi || isTinggi
-                          ? 'bg-rose-500 border-rose-300 shadow-[0_0_8px_#f43f5e]'
-                          : 'bg-slate-800 border-slate-700'
-                      }`}
-                    />
-                    <span className="text-[10px] font-mono font-bold">
-                      {gas.ledPolusi || isTinggi ? 'ON' : 'OFF'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* LED 2: Udara Bersih (Pin 19) */}
-                <div
-                  className={`p-2.5 rounded-lg border transition-all flex items-center justify-between ${
-                    gas.ledBersih !== false && !isTinggi
-                      ? 'bg-emerald-950/40 border-emerald-500/60 text-emerald-200 shadow-sm shadow-emerald-950'
-                      : 'bg-slate-950/60 border-slate-800 text-slate-500'
-                  }`}
-                >
-                  <div className="space-y-0.5">
-                    <p className="text-[11px] font-semibold">LED Udara Bersih</p>
-                    <p className="text-[10px] font-mono opacity-80">GPIO Pin 19</p>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <div
-                      className={`w-3.5 h-3.5 rounded-full border ${
-                        gas.ledBersih !== false && !isTinggi
-                          ? 'bg-emerald-500 border-emerald-300 shadow-[0_0_8px_#10b981]'
-                          : 'bg-slate-800 border-slate-700'
-                      }`}
-                    />
-                    <span className="text-[10px] font-mono font-bold">
-                      {gas.ledBersih !== false && !isTinggi ? 'ON' : 'OFF'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Matrix Klasifikasi & Tindakan Otomasi */}
-            <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-800/80 space-y-2 text-xs">
-              <p className="font-semibold text-white">Logika Klasifikasi Kualitas Udara:</p>
-              <div className="space-y-1.5 text-[11px]">
-                <div className="flex items-center justify-between p-1.5 rounded bg-slate-900 border border-slate-800/60">
-                  <span className="text-emerald-400 font-medium">&lt; 1000 ADC (Bersih):</span>
-                  <span className="text-slate-300 font-mono">LCD Sambutan • LED 19 ON</span>
-                </div>
-                <div className="flex items-center justify-between p-1.5 rounded bg-slate-900 border border-slate-800/60">
-                  <span className="text-amber-300 font-medium">1000 - 1499 ADC (Sedang):</span>
-                  <span className="text-slate-300 font-mono">LCD Nilai Gas • Siaga</span>
-                </div>
-                <div className="flex items-center justify-between p-1.5 rounded bg-slate-900 border border-slate-800/60">
-                  <span className="text-rose-400 font-medium">&gt;= 1500 ADC (Bahaya):</span>
-                  <span className="text-slate-300 font-mono">LED 18 ON • Buzzer Pin 13 Bunyi</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Bottom Bar with Link to Centralized Logs */}
-          <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5 text-xs text-slate-400">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="text-[11px]">Sensor MQ & LCD 1602 Sinkron</span>
-            </div>
-
+          {/* Test Buzzer */}
+          <div className="pt-4 border-t border-[#d3dde9]">
             <button
-              onClick={() => setActiveSubsystem('alerts')}
-              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 flex items-center gap-1.5 text-xs font-medium cursor-pointer transition-colors"
+              type="button"
+              onClick={testBuzzerAlarm}
+              className="neu-btn w-full py-3 px-4 rounded-xl text-xs font-bold text-[#e11d48] flex items-center justify-center gap-2 min-h-[44px]"
             >
-              <Terminal className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Log Sensor Gas</span>
-              <ArrowRight className="w-3 h-3" />
+              <AlertTriangle className="w-4 h-4 text-[#e11d48]" />
+              <span>Uji Alarm Buzzer</span>
             </button>
           </div>
         </div>
