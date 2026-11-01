@@ -39,8 +39,8 @@ def upload_file(local_path, remote_name):
     print(f"Upload {remote_name} SUKSES!")
 
 # Upload lcd_api.py dan esp8266_i2c_lcd.py
-upload_file(r"c:\Users\nadem\OneDrive\Documents\urbanpulse\lcd_api.py", "lcd_api.py")
-upload_file(r"c:\Users\nadem\OneDrive\Documents\urbanpulse\esp8266_i2c_lcd.py", "esp8266_i2c_lcd.py")
+upload_file(r"lcd_api.py", "lcd_api.py")
+upload_file(r"esp8266_i2c_lcd.py", "esp8266_i2c_lcd.py")
 
 # Sekarang jalankan script test langsung menggunakan library Dave Hylands!
 test_script = """

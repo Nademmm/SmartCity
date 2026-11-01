@@ -1,21 +1,21 @@
 @echo off
-title UrbanPulse - Smart City Launcher
+title SmartCity - ESP32 Control Console Launcher
 cd /d "%~dp0"
 
 echo =====================================================================
-echo           URBANPULSE SMART CITY COMMAND CENTER LAUNCHER
+echo            SMARTCITY ESP32 CONTROL CONSOLE LAUNCHER
 echo =====================================================================
 echo.
 echo [1/3] Menjalankan Next.js Web Dashboard di Port 3000 (Semua Jaringan)...
-start "UrbanPulse - Next.js Dashboard" cmd /k "npm run dev"
+start "SmartCity - Next.js Dashboard" cmd /k "npm run dev"
 
 echo.
 echo [2/3] Menjalankan AI YOLO11 Traffic Monitor di Port 8088...
-start "UrbanPulse - AI Camera Backend" cmd /k "cd traffic-monitor && if exist .venv\Scripts\python.exe (.venv\Scripts\python.exe main.py) else (python main.py)"
+start "SmartCity - AI Camera Backend" cmd /k "cd traffic-monitor && if exist .venv\Scripts\python.exe (.venv\Scripts\python.exe main.py) else (python main.py)"
 
 echo.
 echo [3/3] Menjalankan Jembatan Serial IoT (ESP32 COM3 ke Web)...
-start "UrbanPulse - IoT Serial Bridge" cmd /k "powershell -NoProfile -ExecutionPolicy Bypass -File firmware\bridge_serial_to_dashboard.ps1"
+start "SmartCity - IoT Serial Bridge" cmd /k "powershell -NoProfile -ExecutionPolicy Bypass -File firmware\bridge_serial_to_dashboard.ps1"
 
 echo.
 echo =====================================================================

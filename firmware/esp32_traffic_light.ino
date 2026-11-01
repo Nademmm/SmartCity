@@ -1,6 +1,6 @@
 /*
   =============================================================
-  UrbanPulse Smart City - ESP32 Adaptive Traffic Signal (ATSC)
+  SMARTCITY Smart City - ESP32 Adaptive Traffic Signal (ATSC)
   =============================================================
   Sensor: Ultrasonic HC-SR04 (Deteksi Antrean Kendaraan)
   Aktuator: LED Traffic Module (Merah Pin 19, Kuning Pin 21, Hijau Pin 22)

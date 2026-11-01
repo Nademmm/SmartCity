@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(m
 
 def main():
     print("\n" + "=" * 65)
-    print(" 🏙️  URBANPULSE SMART CITY - YOLO11 TRAFFIC MONITORING SYSTEM")
+    print(" 🏙️  SMARTCITY SMART CITY - YOLO11 TRAFFIC MONITORING SYSTEM")
     print("=" * 65)
     print(f" ► Camera Source        : {config.CAMERA_SOURCE}")
     print(f" ► Model YOLO11         : {config.MODEL_PATH}")
@@ -78,7 +78,7 @@ def main():
             show_gui = getattr(config, "SHOW_GUI_WINDOW", True)
             if show_gui:
                 try:
-                    cv2.imshow("UrbanPulse YOLO11 Traffic Monitor", annotated_frame)
+                    cv2.imshow("SMARTCITY YOLO11 Traffic Monitor", annotated_frame)
                     key = cv2.waitKey(1) & 0xFF
                     if key == ord('q') or key == 27:
                         logging.info("Pengguna menekan tombol Keluar ('q' / ESC). Menghentikan sistem...")

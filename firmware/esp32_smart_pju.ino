@@ -1,6 +1,6 @@
 /*
   =============================================================
-  UrbanPulse Smart City - ESP32 Smart Street Lighting (PJU)
+  SMARTCITY Smart City - ESP32 Smart Street Lighting (PJU)
   =============================================================
   Sensor: PIR Motion Sensor (HC-SR501) & LDR Sensor Cahaya
   Aktuator: PWM Dimmer LED (Lampu Jalan)

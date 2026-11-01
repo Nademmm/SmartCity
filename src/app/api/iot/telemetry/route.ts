@@ -12,15 +12,15 @@ export interface TelemetryPacket {
 }
 
 declare global {
-  var __urbanpulse_latest_telemetry: Record<string, TelemetryPacket> | undefined;
-  var __urbanpulse_telemetry_history: TelemetryPacket[] | undefined;
+  var __smartcity_latest_telemetry: Record<string, TelemetryPacket> | undefined;
+  var __smartcity_telemetry_history: TelemetryPacket[] | undefined;
 }
 
-if (!global.__urbanpulse_latest_telemetry) {
-  global.__urbanpulse_latest_telemetry = {};
+if (!global.__smartcity_latest_telemetry) {
+  global.__smartcity_latest_telemetry = {};
 }
-if (!global.__urbanpulse_telemetry_history) {
-  global.__urbanpulse_telemetry_history = [];
+if (!global.__smartcity_telemetry_history) {
+  global.__smartcity_telemetry_history = [];
 }
 
 export async function POST(request: Request) {
@@ -50,13 +50,13 @@ export async function POST(request: Request) {
     };
 
     // Simpan data terbaru
-    global.__urbanpulse_latest_telemetry![type] = packet;
-    global.__urbanpulse_latest_telemetry![deviceId] = packet;
+    global.__smartcity_latest_telemetry![type] = packet;
+    global.__smartcity_latest_telemetry![deviceId] = packet;
 
     // Jika mengirim paket all-in-one miniatur
     if (type === 'miniature-all') {
       if (payload.gas) {
-        global.__urbanpulse_latest_telemetry!['air-quality'] = {
+        global.__smartcity_latest_telemetry!['air-quality'] = {
           deviceId,
           type: 'air-quality',
           timestamp: packet.timestamp,
@@ -64,7 +64,7 @@ export async function POST(request: Request) {
         };
       }
       if (payload.crossing) {
-        global.__urbanpulse_latest_telemetry!['pedestrian'] = {
+        global.__smartcity_latest_telemetry!['pedestrian'] = {
           deviceId,
           type: 'pedestrian',
           timestamp: packet.timestamp,
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
         };
       }
       if (payload.pju) {
-        global.__urbanpulse_latest_telemetry!['pju'] = {
+        global.__smartcity_latest_telemetry!['pju'] = {
           deviceId,
           type: 'pju',
           timestamp: packet.timestamp,
@@ -83,18 +83,18 @@ export async function POST(request: Request) {
 
     // Normalisasi 'gas' alias ke 'air-quality'
     if (type === 'gas') {
-      global.__urbanpulse_latest_telemetry!['air-quality'] = packet;
+      global.__smartcity_latest_telemetry!['air-quality'] = packet;
     }
 
     // Simpan riwayat paket (maksimal 100 paket terakhir)
-    global.__urbanpulse_telemetry_history!.unshift(packet);
-    if (global.__urbanpulse_telemetry_history!.length > 100) {
-      global.__urbanpulse_telemetry_history!.pop();
+    global.__smartcity_telemetry_history!.unshift(packet);
+    if (global.__smartcity_telemetry_history!.length > 100) {
+      global.__smartcity_telemetry_history!.pop();
     }
 
     return NextResponse.json({
       success: true,
-      message: 'Telemetry data successfully received and ingested into UrbanPulse Engine',
+      message: 'Telemetry data successfully received and ingested into SmartCity Engine',
       receivedAt: packet.timestamp,
       packet,
     });
@@ -112,8 +112,8 @@ export async function POST(request: Request) {
 export async function GET() {
   return NextResponse.json({
     success: true,
-    totalPacketsStored: global.__urbanpulse_telemetry_history?.length || 0,
-    latestBySubsystem: global.__urbanpulse_latest_telemetry || {},
-    recentHistory: (global.__urbanpulse_telemetry_history || []).slice(0, 20),
+    totalPacketsStored: global.__smartcity_telemetry_history?.length || 0,
+    latestBySubsystem: global.__smartcity_latest_telemetry || {},
+    recentHistory: (global.__smartcity_telemetry_history || []).slice(0, 20),
   });
 }

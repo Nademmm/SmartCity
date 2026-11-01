@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import {
   SubsystemType,
   CameraTrafficData,
@@ -11,6 +11,8 @@ import {
   AutomationRule,
   SystemAlert,
   SystemEventLog,
+  BuzzerMode,
+  CrossingPhase,
 } from '@/types/iot';
 import {
   INITIAL_TRAFFIC,
@@ -24,15 +26,26 @@ import {
 } from '@/services/iotSimulationEngine';
 import { sounds } from '@/services/soundEffects';
 
+function formatLcdLine1(gasVal: number): string {
+  return `Nilai MQ: ${String(gasVal).padStart(4, ' ')}  `;
+}
+
+function formatLcdLine2(status: string): string {
+  return status.slice(0, 16).padEnd(16, ' ');
+}
+
 interface SmartCityContextType {
   activeSubsystem: SubsystemType;
   setActiveSubsystem: (subsystem: SubsystemType) => void;
 
-  // 4 Core Subsystems
+  theme: 'light' | 'dark';
+  toggleTheme: () => void;
+
   traffic: CameraTrafficData;
   pju: SmartPJUData;
   crossing: SmartCrossingData;
   gas: GasAirQualityData;
+  buzzerMode: BuzzerMode;
 
   devices: IoTDevice[];
   rules: AutomationRule[];
@@ -49,47 +62,43 @@ interface SmartCityContextType {
   toggleLiveIoTMode: () => void;
   lastTelemetryTimestamp: string | null;
 
-  // Real Hardware Connection Status
   isHardwareConnected: boolean;
   isCameraConnected: boolean;
   setIsCameraConnected: (connected: boolean) => void;
   updateTrafficCameraData: (data: Partial<CameraTrafficData>) => void;
 
-  // Hardware Commands & Controls
-  sendCommand: (action: string, value?: any) => Promise<void>;
+  sendCommand: (action: string, value?: unknown) => Promise<void>;
   controlPjuManual: (mode: 'ON' | 'OFF' | 'AUTO') => void;
   testBuzzerAlarm: () => void;
 
-  // PJU Action Handlers
   setLdrValue: (value: number) => void;
   togglePjuDayNight: () => void;
 
-  // Crossing Action Handlers
-  triggerCrossingDetection: (side: 'kanan' | 'kiri' | 'kedua') => void;
+  triggerCrossingDetection: (side: 'kanan' | 'kiri' | 'kedua' | 'force') => void;
   resetCrossingToSafe: () => void;
-  updateUltrasonicDistances: (kanan: number, kiri: number) => void;
+  updateUltrasonicDistances: (kanan: number | null, kiri: number | null) => void;
 
-  // Gas Action Handlers
   controlGasManual: (mode: 'AUTO' | 'BERSIH' | 'SEDANG' | 'BAHAYA' | number) => void;
   setGasSensorValue: (value: number) => void;
   isPollutionAlarmActive: boolean;
   dismissPollutionAlarm: () => void;
   snoozePollutionAlarm: () => void;
 
-  // Traffic Action Handlers
   triggerTrafficEmergency: () => void;
   setTrafficModeAuto: (isAuto: boolean) => void;
+  setTrafficLightManual: (color: 'green' | 'yellow' | 'red') => void;
 
-  // Alerts & Rules
   toggleRule: (id: string) => void;
   markAlertAsRead: (id: string) => void;
   resolveAlert: (id: string) => void;
+  clearEventLogs: () => void;
 }
 
 const SmartCityContext = createContext<SmartCityContextType | undefined>(undefined);
 
 export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   const [activeSubsystem, setActiveSubsystem] = useState<SubsystemType>('overview');
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
 
   const [traffic, setTraffic] = useState<CameraTrafficData>(INITIAL_TRAFFIC);
   const [pju, setPju] = useState<SmartPJUData>(INITIAL_PJU);
@@ -110,6 +119,19 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
 
   const [isHardwareConnected, setIsHardwareConnected] = useState<boolean>(false);
   const [isCameraConnected, setIsCameraConnected] = useState<boolean>(false);
+
+  const crossingTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.dataset.theme = theme;
+    }
+  }, [theme]);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
+    sounds.playClick();
+  }, []);
 
   const toggleLiveIoTMode = useCallback(() => {
     setIsLiveIoTMode((prev) => !prev);
@@ -134,10 +156,14 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
         details,
         type,
       };
-      setEventLogs((prev) => [newLog, ...prev.slice(0, 49)]);
+      setEventLogs((prev) => [newLog, ...prev.slice(0, 59)]);
     },
     []
   );
+
+  const clearEventLogs = useCallback(() => {
+    setEventLogs([]);
+  }, []);
 
   const addAlert = useCallback(
     (severity: 'CRITICAL' | 'WARNING' | 'INFO', subsystem: string, title: string, description: string) => {
@@ -151,7 +177,7 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
         isRead: false,
         isResolved: false,
       };
-      setAlerts((prev) => [newAlert, ...prev]);
+      setAlerts((prev) => [newAlert, ...prev.slice(0, 29)]);
       if (severity === 'CRITICAL') {
         sounds.playCritical();
       } else if (severity === 'WARNING') {
@@ -164,19 +190,17 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   // ==========================================================
   // PENGIRIMAN PERINTAH KE HARDWARE ESP32 (DUA ARAH)
   // ==========================================================
-  const sendCommand = useCallback(async (action: string, value?: any) => {
+  const sendCommand = useCallback(async (action: string, value?: unknown) => {
     try {
-      // 1. Direct Web Serial jika port USB sedang aktif di browser
-      if (typeof window !== 'undefined' && (window as any).__urbanpulse_send_serial) {
+      const win = typeof window !== 'undefined' ? (window as unknown as { __smartcity_send_serial?: (cmd: string) => Promise<void> }) : null;
+      if (win && win.__smartcity_send_serial) {
         try {
-          await (window as any).__urbanpulse_send_serial(action);
-          console.log('[SERIAL DIRECT] Mengirim perintah:', action);
+          await win.__smartcity_send_serial(action);
         } catch (e) {
           console.warn('[SERIAL DIRECT] Gagal kirim serial langsung:', e);
         }
       }
 
-      // 2. Queue backend /api/iot/control agar bridge PowerShell juga bisa membaca
       await fetch('/api/iot/control', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -192,12 +216,12 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   // ==========================================================
-  // FITUR 3: SMART PJU LOGIC (AUTO LDR & MANUAL CONTROL)
+  // FITUR 5: SMART PJU LOGIC (AUTO LDR & MANUAL ON/OFF)
   // ==========================================================
   const controlPjuManual = useCallback(
     (mode: 'ON' | 'OFF' | 'AUTO') => {
       sounds.playClick();
-      const nowTime = new Date().toLocaleTimeString('id-ID', { hour12: false }) + ' WIB';
+      const nowTime = new Date().toLocaleTimeString('id-ID', { hour12: false });
 
       if (mode === 'ON') {
         sendCommand('CMD:PJU_ON');
@@ -211,7 +235,7 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
           jamTerakhirBeralih: nowTime,
           siklusWaktu: 'MALAM',
         }));
-        addEventLog('Smart PJU', 'Kontrol Manual: ON', 'Perintah CMD:PJU_ON dikirim (LED 25 & 26 Menyala)', 'MANUAL');
+        addEventLog('Smart PJU', 'CMD:PJU_ON', 'PJU disetel MANUAL ON (LED Pin 25 & 26 menyala)', 'MANUAL');
       } else if (mode === 'OFF') {
         sendCommand('CMD:PJU_OFF');
         setPju((prev) => ({
@@ -224,7 +248,7 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
           jamTerakhirBeralih: nowTime,
           siklusWaktu: 'SIANG',
         }));
-        addEventLog('Smart PJU', 'Kontrol Manual: OFF', 'Perintah CMD:PJU_OFF dikirim (LED 25 & 26 Padam)', 'MANUAL');
+        addEventLog('Smart PJU', 'CMD:PJU_OFF', 'PJU disetel MANUAL OFF (LED Pin 25 & 26 mati)', 'MANUAL');
       } else {
         sendCommand('CMD:PJU_AUTO');
         setPju((prev) => {
@@ -240,21 +264,28 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
             siklusWaktu: isDark ? 'MALAM' : 'SIANG',
           };
         });
-        addEventLog('Smart PJU', 'Mode Otomatis LDR Aktif', 'Perintah CMD:PJU_AUTO dikirim (Kembali ke Sensor LDR)', 'MANUAL');
+        addEventLog('Smart PJU', 'CMD:PJU_AUTO', 'PJU kembali mengikuti sensor LDR Pin 36 (> 2000 = Menyala)', 'MANUAL');
       }
     },
     [sendCommand, addEventLog]
   );
 
   const setLdrValue = useCallback((value: number) => {
-    const isDark = value > 2000;
-    const nowTime = new Date().toLocaleTimeString('id-ID', { hour12: false }) + ' WIB';
+    const nowTime = new Date().toLocaleTimeString('id-ID', { hour12: false });
     setPju((prev) => {
-      const conditionChanged = (isDark ? 'GELAP' : 'TERANG') !== prev.kondisi;
+      if (prev.pjuMode === 'ON') {
+        return { ...prev, ldrValue: value };
+      }
+      if (prev.pjuMode === 'OFF') {
+        return { ...prev, ldrValue: value };
+      }
+      const isDark = value > prev.thresholdLdr;
+      const nextKondisi = isDark ? 'GELAP' : 'TERANG';
+      const conditionChanged = nextKondisi !== prev.kondisi;
       return {
         ...prev,
         ldrValue: value,
-        kondisi: isDark ? 'GELAP' : 'TERANG',
+        kondisi: nextKondisi,
         pjuStatus: isDark ? 'MENYALA' : 'MATI',
         ledMerah: isDark,
         ledPutih: isDark,
@@ -265,10 +296,9 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const togglePjuDayNight = useCallback(() => {
-    sounds.playClick();
     setPju((prev) => {
-      const isCurrentlyDark = prev.kondisi === 'GELAP' || prev.kondisi === 'MANUAL_ON';
-      if (isCurrentlyDark) {
+      const isCurrentlyOn = prev.pjuStatus === 'MENYALA';
+      if (isCurrentlyOn) {
         controlPjuManual('OFF');
       } else {
         controlPjuManual('ON');
@@ -278,27 +308,27 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   }, [controlPjuManual]);
 
   // ==========================================================
-  // FITUR 2: SMART PENYEBERANGAN (Ultrasonik Kanan 17cm, Kiri 25cm, 5s)
+  // FITUR 2 & 3: SMART PENYEBERANGAN (HIJAU -> KUNING 1s -> MERAH 5s -> TUNGGU_KOSONG)
   // ==========================================================
-  const triggerCrossingDetection = useCallback(
-    (side: 'kanan' | 'kiri' | 'kedua') => {
-      sounds.playSuccess();
-      const jarakKanan = side === 'kiri' ? 35 : 12; // 12 cm <= BATAS_KANAN (17 cm)
-      const jarakKiri = side === 'kanan' ? 42 : 18;  // 18 cm <= BATAS_KIRI (25 cm)
+  const startCrossingSequence = useCallback(
+    (jKanan: number | null, jKiri: number | null, label: string, sendHwCommand: boolean) => {
+      if (crossingTimerRef.current) {
+        clearTimeout(crossingTimerRef.current);
+      }
 
-      const orangKanan = jarakKanan <= 17;
-      const orangKiri = jarakKiri <= 25;
+      const oKanan = jKanan !== null && jKanan > 0 && jKanan <= 17;
+      const oKiri = jKiri !== null && jKiri > 0 && jKiri <= 25;
 
-      // Kirim perintah picu penyeberangan fisik ke ESP32
-      sendCommand('CMD:CROSSING_TRIGGER');
+      if (sendHwCommand) {
+        sendCommand('CMD:FORCE_CROSSING');
+      }
 
-      // Lampu Kuning 1 detik -> Lampu Merah 5 detik + Buzzer
       setCrossing((prev) => ({
         ...prev,
-        jarakKanan,
-        jarakKiri,
-        orangKanan,
-        orangKiri,
+        jarakKanan: jKanan,
+        jarakKiri: jKiri,
+        orangKanan: oKanan,
+        orangKiri: oKiri,
         siapMenyeberang: false,
         lampu: 'KUNING',
         buzzer: false,
@@ -308,13 +338,12 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
 
       addEventLog(
         'Penyeberangan',
-        `Objek Terdeteksi (${side.toUpperCase()})`,
-        `Jarak Kanan: ${jarakKanan}cm (Batas: 17cm), Kiri: ${jarakKiri}cm (Batas: 25cm). Lampu Kuning 1 detik.`,
+        label,
+        `Fase KUNING (1 detik) -> MERAH (5 detik). Kanan: ${jKanan ?? '-'}cm, Kiri: ${jKiri ?? '-'}cm`,
         'MANUAL'
       );
 
-      // Setelah 1 detik Kuning, masuk fase Merah 5s
-      setTimeout(() => {
+      crossingTimerRef.current = setTimeout(() => {
         setCrossing((prev) => ({
           ...prev,
           lampu: 'MERAH',
@@ -327,7 +356,20 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
     [sendCommand, addEventLog]
   );
 
+  const triggerCrossingDetection = useCallback(
+    (side: 'kanan' | 'kiri' | 'kedua' | 'force') => {
+      sounds.playSuccess();
+      const jarakKanan = side === 'kiri' ? 35 : side === 'force' ? crossing.jarakKanan : 12;
+      const jarakKiri = side === 'kanan' ? 42 : side === 'force' ? crossing.jarakKiri : 18;
+      startCrossingSequence(jarakKanan, jarakKiri, `CMD:FORCE_CROSSING (${side.toUpperCase()})`, true);
+    },
+    [crossing.jarakKanan, crossing.jarakKiri, startCrossingSequence]
+  );
+
   const resetCrossingToSafe = useCallback(() => {
+    if (crossingTimerRef.current) {
+      clearTimeout(crossingTimerRef.current);
+    }
     sounds.playClick();
     sendCommand('CMD:CROSSING_RESET');
     setCrossing((prev) => ({
@@ -342,33 +384,52 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
       countdownSeconds: 0,
       statusRingkasan: 'AMAN',
     }));
-    addEventLog('Penyeberangan', 'Reset Aman', 'Perintah CMD:CROSSING_RESET dikirim, Lampu Hijau aktif', 'MANUAL');
+    addEventLog('Penyeberangan', 'Reset ke HIJAU', 'Area kosong (Kanan 35cm, Kiri 42cm), siap mendeteksi ulang', 'MANUAL');
   }, [sendCommand, addEventLog]);
 
-  const testBuzzerAlarm = useCallback(() => {
-    sounds.startPollutionAlarm();
-    setTimeout(() => {
-      if (!isPollutionAlarmActive) {
-        sounds.stopPollutionAlarm();
-      }
-    }, 4000);
-    sendCommand('CMD:ALARM_TEST');
-    addEventLog('Buzzer & Alarm', 'Uji Alarm Ninu-Ninu', 'Audio ninuninu.ogg diputar & CMD:ALARM_TEST dikirim ke ESP32 Pin 13', 'MANUAL');
-  }, [sendCommand, addEventLog, isPollutionAlarmActive]);
-
   const updateUltrasonicDistances = useCallback(
-    (kanan: number, kiri: number) => {
-      const orangKanan = kanan <= 17;
-      const orangKiri = kiri <= 25;
+    (kanan: number | null, kiri: number | null) => {
+      const orangKanan = kanan !== null && kanan > 0 && kanan <= 17;
+      const orangKiri = kiri !== null && kiri > 0 && kiri <= 25;
       const adaOrang = orangKanan || orangKiri;
 
       setCrossing((prev) => {
-        let statusRingkasan: 'AMAN' | 'ORANG TERDETEKSI' | 'ORANG MENYEBRANG' | 'MENUNGGU KOSONG' = 'AMAN';
+        // Jika fase HIJAU dan siap_menyeberang dan ada_orang -> masuk KUNING
+        if (prev.lampu === 'HIJAU' && prev.siapMenyeberang && adaOrang) {
+          setTimeout(() => {
+            startCrossingSequence(kanan, kiri, 'Deteksi Ultrasonik', true);
+          }, 0);
+          return {
+            ...prev,
+            jarakKanan: kanan,
+            jarakKiri: kiri,
+            orangKanan,
+            orangKiri,
+          };
+        }
+
+        // Jika fase TUNGGU_KOSONG dan objek sudah menjauh (!adaOrang) -> kembali HIJAU
+        if (prev.lampu === 'TUNGGU_KOSONG' && !adaOrang) {
+          return {
+            ...prev,
+            jarakKanan: kanan,
+            jarakKiri: kiri,
+            orangKanan: false,
+            orangKiri: false,
+            siapMenyeberang: true,
+            lampu: 'HIJAU',
+            buzzer: false,
+            countdownSeconds: 0,
+            statusRingkasan: 'AMAN',
+          };
+        }
+
+        let statusRingkasan: SmartCrossingData['statusRingkasan'] = 'AMAN';
         if (prev.lampu === 'MERAH') {
           statusRingkasan = 'ORANG MENYEBRANG';
-        } else if (!prev.siapMenyeberang && adaOrang) {
+        } else if (prev.lampu === 'TUNGGU_KOSONG') {
           statusRingkasan = 'MENUNGGU KOSONG';
-        } else if (adaOrang) {
+        } else if (adaOrang || prev.lampu === 'KUNING') {
           statusRingkasan = 'ORANG TERDETEKSI';
         }
 
@@ -378,38 +439,45 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
           jarakKiri: kiri,
           orangKanan,
           orangKiri,
-          siapMenyeberang: !adaOrang ? true : prev.siapMenyeberang,
           statusRingkasan,
         };
       });
     },
-    []
+    [startCrossingSequence]
   );
 
   // ==========================================================
-  // FITUR 1: MONITORING POLUSI UDARA (Sensor Gas / MQ ADC Pin 39)
+  // FITUR 4: BUZZER DUA FUNGSI (Pin 4)
+  // ==========================================================
+  const testBuzzerAlarm = useCallback(() => {
+    sounds.playAlert();
+    sendCommand('CMD:BUZZER_TEST');
+    addEventLog('Buzzer Pin 4', 'CMD:BUZZER_TEST', 'Uji bunyi buzzer 300ms dikirim ke ESP32 Pin 4', 'MANUAL');
+  }, [sendCommand, addEventLog]);
+
+  // ==========================================================
+  // FITUR 1: MONITORING POLUSI MQ (Pin 39) + LCD SoftI2C
   // ==========================================================
   const dismissPollutionAlarm = useCallback(() => {
     sounds.stopPollutionAlarm();
     setIsPollutionAlarmActive(false);
-    // Tunda alarm selama 5 menit agar tidak terus-menerus muncul saat telemetri berjalan
     setAlarmSnoozeUntil(Date.now() + 300000);
     sendCommand('CMD:BUZZER_MUTE');
-    addEventLog('Sensor Gas MQ', 'Alarm Dihilangkan', 'Pengguna menghentikan alarm polusi darurat', 'MANUAL');
+    addEventLog('Sensor Gas MQ', 'Alarm Dibisukan', 'Operator membisukan alarm polusi tinggi', 'MANUAL');
   }, [sendCommand, addEventLog]);
 
   const snoozePollutionAlarm = useCallback(() => {
     sounds.stopPollutionAlarm();
     setIsPollutionAlarmActive(false);
-    setAlarmSnoozeUntil(Date.now() + 60000); // Tunda 1 menit
+    setAlarmSnoozeUntil(Date.now() + 60000);
     sendCommand('CMD:BUZZER_MUTE');
-    addEventLog('Sensor Gas MQ', 'Alarm Ditunda 1 Menit', 'Alarm polusi ditunda sementara', 'MANUAL');
+    addEventLog('Sensor Gas MQ', 'Alarm Ditunda 1m', 'Alarm polusi ditunda selama 60 detik', 'MANUAL');
   }, [sendCommand, addEventLog]);
 
   const controlGasManual = useCallback(
     (mode: 'AUTO' | 'BERSIH' | 'SEDANG' | 'BAHAYA' | number) => {
       sounds.playClick();
-      const nowTime = new Date().toLocaleTimeString('id-ID', { hour12: false }) + ' WIB';
+      const nowTime = new Date().toLocaleTimeString('id-ID', { hour12: false });
 
       if (mode === 'AUTO') {
         sendCommand('CMD:GAS_AUTO');
@@ -419,38 +487,31 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
         }));
         sounds.stopPollutionAlarm();
         setIsPollutionAlarmActive(false);
-        addEventLog('Sensor Gas MQ', 'Mode Otomatis Aktif', 'Perintah CMD:GAS_AUTO dikirim (Membaca sensor fisik Pin 39)', 'MANUAL');
+        addEventLog('Sensor Gas MQ', 'CMD:GAS_AUTO', 'Pembacaan kembali ke sensor fisik ADC Pin 39', 'MANUAL');
         return;
       }
 
       let val = 650;
       let cmd = 'CMD:GAS_BERSIH';
-      let title = 'Simulasi: Udara Bersih';
-
       if (mode === 'BERSIH') {
         val = 650;
         cmd = 'CMD:GAS_BERSIH';
-        title = 'Simulasi: Udara Bersih (650 ADC)';
       } else if (mode === 'SEDANG') {
         val = 1250;
         cmd = 'CMD:GAS_SEDANG';
-        title = 'Simulasi: Polusi Sedang (1250 ADC)';
       } else if (mode === 'BAHAYA') {
         val = 2100;
         cmd = 'CMD:GAS_BAHAYA';
-        title = 'Simulasi: Polusi Tinggi (2100 ADC)';
       } else if (typeof mode === 'number') {
         val = Math.max(0, Math.min(4095, Math.round(mode)));
         cmd = `CMD:GAS_SET:${val}`;
-        title = `Simulasi: Manual Nilai Gas (${val} ADC)`;
       }
 
       sendCommand(cmd);
 
-      const statusPolusi: 'UDARA BERSIH' | 'POLUSI SEDANG' | 'POLUSI TINGGI' =
+      const statusPolusi: GasAirQualityData['statusPolusi'] =
         val < 1000 ? 'UDARA BERSIH' : val < 1500 ? 'POLUSI SEDANG' : 'POLUSI TINGGI';
       const isHigh = val >= 1500;
-      const isMed = val >= 1000 && val < 1500;
 
       setGas((prev) => ({
         ...prev,
@@ -459,17 +520,15 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
         statusPolusi,
         isAlarmActive: isHigh,
         lastAlarmTime: isHigh ? nowTime : prev.lastAlarmTime,
-        ledPolusi: isHigh || isMed,
-        ledBersih: !isHigh,
-        lcdBaris1: isHigh ? 'STATUS: BAHAYA!' : isMed ? 'STATUS: WASPADA' : 'Selamat Datang',
-        lcdBaris2: isHigh ? 'Polusi: TINGGI' : isMed ? `Gas: ${val} Sedang` : 'Di Kota Pintar',
+        lcdBaris1: formatLcdLine1(val),
+        lcdBaris2: formatLcdLine2(statusPolusi),
         lcdTersedia: true,
       }));
 
-      addEventLog('Sensor Gas MQ', title, `Perintah ${cmd} dikirim ke ESP32`, 'MANUAL');
+      addEventLog('Sensor Gas MQ', `${cmd}`, `Nilai MQ: ${val} ADC (${statusPolusi})`, 'MANUAL');
 
       if (isHigh) {
-        addAlert('CRITICAL', 'Sensor Gas MQ', 'Peringatan Polusi Udara Tinggi!', `Nilai Gas disimulasikan pada ${val} ADC.`);
+        addAlert('CRITICAL', 'Sensor Gas MQ', `Polusi Tinggi (${val} ADC)`, 'Melebihi BATAS_GAS 1500 ADC. Buzzer Pin 4 aktif.');
         if (Date.now() > alarmSnoozeUntil) {
           setIsPollutionAlarmActive(true);
           sounds.startPollutionAlarm();
@@ -490,7 +549,7 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   );
 
   // ==========================================================
-  // FITUR 4: TRAFFIC CONTROLLER (Kamera AI YOLO11)
+  // TRAFFIC CONTROLLER (Kamera AI YOLO11 / Browser)
   // ==========================================================
   const triggerTrafficEmergency = useCallback(() => {
     sounds.playAlert();
@@ -499,12 +558,22 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
       currentLight: 'green',
       countdownSeconds: 45,
     }));
-    addEventLog('Kamera AI', 'Prioritas Jalur Kendaraan Diaktifkan', 'Lampu Hijau dipaksakan untuk kelancaran arus', 'MANUAL');
+    addEventLog('Kamera Simpang', 'Prioritas Hijau', 'Lampu hijau simpang diaktifkan 45 detik', 'MANUAL');
   }, [addEventLog]);
 
   const setTrafficModeAuto = useCallback((isAuto: boolean) => {
     sounds.playClick();
     setTraffic((prev) => ({ ...prev, isAutomatic: isAuto }));
+  }, []);
+
+  const setTrafficLightManual = useCallback((color: 'green' | 'yellow' | 'red') => {
+    sounds.playClick();
+    setTraffic((prev) => ({
+      ...prev,
+      isAutomatic: false,
+      currentLight: color,
+      countdownSeconds: color === 'green' ? 30 : color === 'yellow' ? 4 : 35,
+    }));
   }, []);
 
   const updateTrafficCameraData = useCallback((data: Partial<CameraTrafficData>) => {
@@ -517,28 +586,9 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
     }));
   }, []);
 
-  // Update devices table when camera connected state changes
-  useEffect(() => {
-    setDevices((prev) =>
-      prev.map((d) => {
-        if (d.id === 'YOLO-CV-TRAFFIC-01') {
-          return {
-            ...d,
-            status: isCameraConnected ? 'Online' : 'Offline',
-            lastPing: isCameraConnected ? 'Webcam Aktif (Direct Browser)' : 'Menunggu Kamera',
-          };
-        }
-        return d;
-      })
-    );
-  }, [isCameraConnected]);
-
-  // Rules & Alerts Handlers
   const toggleRule = useCallback((id: string) => {
     sounds.playClick();
-    setRules((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, isEnabled: !r.isEnabled } : r))
-    );
+    setRules((prev) => prev.map((r) => (r.id === id ? { ...r, isEnabled: !r.isEnabled } : r)));
   }, []);
 
   const markAlertAsRead = useCallback((id: string) => {
@@ -551,26 +601,34 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
     setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, isResolved: true, isRead: true } : a)));
   }, []);
 
-  // Countdown tick loop only for active crossing sequence and traffic
+  // ==========================================================
+  // SIKLUS DETIK: PENYEBERANGAN (MERAH 5s -> TUNGGU_KOSONG / HIJAU) & TRAFFIC
+  // ==========================================================
   useEffect(() => {
     if (!isSimulating) return;
 
     const timer = setInterval(() => {
-      // 1. Tick crossing countdown if currently red (menyeberang)
       setCrossing((prev) => {
         if (prev.lampu === 'MERAH' && prev.countdownSeconds > 0) {
           const nextCountdown = prev.countdownSeconds - 1;
-          if (nextCountdown === 0) {
+          if (nextCountdown <= 0) {
+            const adaOrang = prev.orangKanan || prev.orangKiri;
+            if (adaOrang) {
+              return {
+                ...prev,
+                lampu: 'TUNGGU_KOSONG',
+                buzzer: false,
+                countdownSeconds: 0,
+                siapMenyeberang: false,
+                statusRingkasan: 'MENUNGGU KOSONG',
+              };
+            }
             return {
               ...prev,
               lampu: 'HIJAU',
               buzzer: false,
               countdownSeconds: 0,
-              orangKanan: false,
-              orangKiri: false,
               siapMenyeberang: true,
-              jarakKanan: 35.0,
-              jarakKiri: 42.0,
               statusRingkasan: 'AMAN',
             };
           }
@@ -582,7 +640,6 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
         return prev;
       });
 
-      // 2. Tick traffic light countdown
       setTraffic((prev) => {
         if (!prev.isAutomatic) return prev;
         const nextSeconds = prev.countdownSeconds - 1;
@@ -615,7 +672,9 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
     return () => clearInterval(timer);
   }, [isSimulating]);
 
-  // Telemetry Polling Effect (Mengambil data live dari /api/iot/telemetry)
+  // ==========================================================
+  // POLLING TELEMETRI DARI /api/iot/telemetry
+  // ==========================================================
   useEffect(() => {
     if (!isLiveIoTMode) return;
 
@@ -634,13 +693,11 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
         let espDataFresh = false;
         let camDataFresh = false;
 
-        // 1. Ingest Traffic Data (YOLO11)
+        // 1. Traffic Data
         if (data.latestBySubsystem['traffic']) {
           const t = data.latestBySubsystem['traffic'];
           const packetAge = now - new Date(t.timestamp).getTime();
-          if (packetAge < 15000) {
-            camDataFresh = true;
-          }
+          if (packetAge < 15000) camDataFresh = true;
 
           if (t.timestamp !== lastProcessedTimestamp) {
             const p = t.payload;
@@ -657,83 +714,90 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
           }
         }
 
-        // 2. Ingest PJU Data (ESP32 Miniatur)
+        // 2. Smart PJU Data (ESP32)
         if (data.latestBySubsystem['pju']) {
           const pjuPacket = data.latestBySubsystem['pju'];
           const packetAge = now - new Date(pjuPacket.timestamp).getTime();
-          if (packetAge < 15000) {
-            espDataFresh = true;
-          }
+          if (packetAge < 15000) espDataFresh = true;
 
           const p = pjuPacket.payload;
-          const ldr = p.ldrValue ?? p.ldr ?? pju.ldrValue;
-          const isDark = ldr > 2000;
-          setPju((prev) => ({
-            ...prev,
-            ldrValue: ldr,
-            thresholdLdr: p.thresholdLdr ?? prev.thresholdLdr,
-            kondisi: p.kondisi ?? (isDark ? 'GELAP' : 'TERANG'),
-            pjuStatus: p.pjuStatus ?? (isDark ? 'MENYALA' : 'MATI'),
-            ledMerah: p.ledMerah !== undefined ? p.ledMerah : isDark,
-            ledPutih: p.ledPutih !== undefined ? p.ledPutih : isDark,
-          }));
+          setPju((prev) => {
+            const ldr = p.ldrValue ?? p.ldr ?? prev.ldrValue;
+            const mode: 'AUTO' | 'ON' | 'OFF' = p.pjuMode ?? prev.pjuMode;
+            const isDark = ldr > prev.thresholdLdr;
+            const kondisi: SmartPJUData['kondisi'] =
+              p.kondisi ?? (mode === 'ON' ? 'MANUAL_ON' : mode === 'OFF' ? 'MANUAL_OFF' : isDark ? 'GELAP' : 'TERANG');
+            const pjuStatus: SmartPJUData['pjuStatus'] =
+              p.pjuStatus ?? (kondisi === 'MANUAL_ON' || kondisi === 'GELAP' ? 'MENYALA' : 'MATI');
+            const ledsOn = pjuStatus === 'MENYALA';
+
+            return {
+              ...prev,
+              ldrValue: ldr,
+              pjuMode: mode,
+              kondisi,
+              pjuStatus,
+              ledMerah: p.ledMerah !== undefined ? p.ledMerah : ledsOn,
+              ledPutih: p.ledPutih !== undefined ? p.ledPutih : ledsOn,
+            };
+          });
         }
 
-        // 3. Ingest Crossing Data (ESP32 Miniatur)
+        // 3. Smart Penyeberangan Data (ESP32)
         if (data.latestBySubsystem['pedestrian']) {
           const pedPacket = data.latestBySubsystem['pedestrian'];
           const packetAge = now - new Date(pedPacket.timestamp).getTime();
-          if (packetAge < 15000) {
-            espDataFresh = true;
-          }
+          if (packetAge < 15000) espDataFresh = true;
 
           const c = pedPacket.payload;
-          const jKanan = c.jarakKanan ?? c.jarak_kanan ?? crossing.jarakKanan;
-          const jKiri = c.jarakKiri ?? c.jarak_kiri ?? crossing.jarakKiri;
-          const oKanan = c.orangKanan ?? (jKanan !== null && jKanan <= (c.batasKanan ?? 17));
-          const oKiri = c.orangKiri ?? (jKiri !== null && jKiri <= (c.batasKiri ?? 25));
-          const siapMenyeberang = c.siapMenyeberang ?? c.siap_menyeberang ?? crossing.siapMenyeberang;
+          setCrossing((prev) => {
+            const jKanan = c.jarakKanan !== undefined ? c.jarakKanan : prev.jarakKanan;
+            const jKiri = c.jarakKiri !== undefined ? c.jarakKiri : prev.jarakKiri;
+            const oKanan = c.orangKanan ?? (jKanan !== null && jKanan > 0 && jKanan <= 17);
+            const oKiri = c.orangKiri ?? (jKiri !== null && jKiri > 0 && jKiri <= 25);
+            const lampu: CrossingPhase = c.lampu ?? prev.lampu;
+            const siapMenyeberang = lampu === 'HIJAU';
 
-          setCrossing((prev) => ({
-            ...prev,
-            jarakKanan: jKanan,
-            jarakKiri: jKiri,
-            orangKanan: oKanan,
-            orangKiri: oKiri,
-            siapMenyeberang,
-            lampu: c.lampu ?? prev.lampu,
-            buzzer: c.buzzer ?? prev.buzzer,
-            countdownSeconds: c.countdownSeconds ?? prev.countdownSeconds,
-            statusRingkasan:
-              c.statusRingkasan ?? (oKanan || oKiri ? (prev.lampu === 'MERAH' ? 'ORANG MENYEBRANG' : 'ORANG TERDETEKSI') : 'AMAN'),
-          }));
+            let statusRingkasan: SmartCrossingData['statusRingkasan'] = 'AMAN';
+            if (lampu === 'MERAH') statusRingkasan = 'ORANG MENYEBRANG';
+            else if (lampu === 'TUNGGU_KOSONG') statusRingkasan = 'MENUNGGU KOSONG';
+            else if (lampu === 'KUNING' || oKanan || oKiri) statusRingkasan = 'ORANG TERDETEKSI';
+
+            return {
+              ...prev,
+              jarakKanan: jKanan,
+              jarakKiri: jKiri,
+              orangKanan: oKanan,
+              orangKiri: oKiri,
+              siapMenyeberang,
+              lampu,
+              buzzer: lampu === 'MERAH',
+              countdownSeconds: lampu === 'MERAH' ? (prev.countdownSeconds || 5) : lampu === 'KUNING' ? 1 : 0,
+              statusRingkasan,
+            };
+          });
         }
 
-        // 4. Ingest Gas Data (ESP32 Miniatur)
+        // 4. Sensor Gas MQ + LCD 16x2 Data (ESP32)
         if (data.latestBySubsystem['air-quality']) {
           const gasPacket = data.latestBySubsystem['air-quality'];
           const packetAge = now - new Date(gasPacket.timestamp).getTime();
-          if (packetAge < 15000) {
-            espDataFresh = true;
-          }
+          if (packetAge < 15000) espDataFresh = true;
 
           const g = gasPacket.payload;
-          const incomingGasMode = g.gasMode || 'AUTO';
-
           setGas((prev) => {
-            const isManualMode = prev.gasMode === 'MANUAL' || incomingGasMode === 'MANUAL';
-            const val = isManualMode
-              ? (prev.gasMode === 'MANUAL' ? prev.gasValue : (g.gasValue ?? prev.gasValue))
-              : (g.gasValue ?? g.nilai_gas ?? g.gas ?? prev.gasValue);
+            const incomingMode = g.gasMode || 'AUTO';
+            const isManual = prev.gasMode === 'MANUAL' || incomingMode === 'MANUAL';
+            const val = isManual
+              ? prev.gasMode === 'MANUAL'
+                ? prev.gasValue
+                : (g.gasValue ?? g.gas ?? prev.gasValue)
+              : (g.gasValue ?? g.gas ?? prev.gasValue);
 
-            let statusPolusi: 'UDARA BERSIH' | 'POLUSI SEDANG' | 'POLUSI TINGGI' = 'UDARA BERSIH';
-            if (val < 1000) statusPolusi = 'UDARA BERSIH';
-            else if (val < 1500) statusPolusi = 'POLUSI SEDANG';
-            else statusPolusi = 'POLUSI TINGGI';
-
-            const nowTime = new Date().toLocaleTimeString('id-ID', { hour12: false }) + ' WIB';
-            const isHigh = statusPolusi === 'POLUSI TINGGI';
-            const isMed = statusPolusi === 'POLUSI SEDANG';
+            const statusPolusi: GasAirQualityData['statusPolusi'] =
+              g.statusPolusi ?? (val < 1000 ? 'UDARA BERSIH' : val < 1500 ? 'POLUSI SEDANG' : 'POLUSI TINGGI');
+            const isHigh = val >= 1500;
+            const nowTime = new Date().toLocaleTimeString('id-ID', { hour12: false });
 
             if (isHigh) {
               if (Date.now() > alarmSnoozeUntil) {
@@ -748,67 +812,66 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
             return {
               ...prev,
               gasValue: val,
-              gasMode: isManualMode ? 'MANUAL' : 'AUTO',
-              statusPolusi: g.statusPolusi ?? g.status ?? statusPolusi,
+              gasMode: isManual ? 'MANUAL' : 'AUTO',
+              statusPolusi,
               isAlarmActive: isHigh,
-              lastAlarmTime: isHigh ? (prev.lastAlarmTime || nowTime) : prev.lastAlarmTime,
-              ledPolusi: g.ledPolusi !== undefined ? g.ledPolusi : (isHigh || isMed),
-              ledBersih: g.ledBersih !== undefined ? g.ledBersih : !isHigh,
-              lcdBaris1: g.lcdBaris1 ?? (isHigh ? 'STATUS: BAHAYA!' : isMed ? 'STATUS: WASPADA' : 'Selamat Datang'),
-              lcdBaris2: g.lcdBaris2 ?? (isHigh ? 'Polusi: TINGGI' : isMed ? `Gas: ${val} Sedang` : 'Di Kota Pintar'),
-              lcdTersedia: g.lcdTersedia ?? true,
+              lastAlarmTime: isHigh ? prev.lastAlarmTime || nowTime : prev.lastAlarmTime,
+              lcdBaris1: formatLcdLine1(val),
+              lcdBaris2: formatLcdLine2(statusPolusi),
+              lcdTersedia: true,
             };
           });
         }
 
         setIsHardwareConnected(espDataFresh);
-        setIsCameraConnected(camDataFresh);
+        if (camDataFresh) setIsCameraConnected(true);
 
         if (espDataFresh || camDataFresh) {
-          setLastTelemetryTimestamp(new Date().toLocaleTimeString('id-ID'));
+          setLastTelemetryTimestamp(new Date().toLocaleTimeString('id-ID', { hour12: false }));
         }
 
-        // Update Devices status
         setDevices((prev) =>
           prev.map((d) => {
-            if (d.id === 'ESP32-MINIATURE' || d.type.includes('Sensor')) {
+            if (d.id === 'ESP32-MINIATURE') {
               return {
                 ...d,
                 status: espDataFresh ? 'Online' : 'Offline',
-                lastPing: espDataFresh ? 'Live Telemetri' : 'Belum Terhubung',
-              };
-            }
-            if (d.id === 'YOLO-CV-TRAFFIC-01') {
-              return {
-                ...d,
-                status: camDataFresh ? 'Online' : 'Offline',
-                lastPing: camDataFresh ? 'Live Stream Active' : 'Menunggu Feed',
+                lastPing: espDataFresh ? 'Aktif (COM3)' : 'Siaga',
               };
             }
             return d;
           })
         );
-      } catch (err) {
-        // Silently handled
+      } catch {
+        // Ignore network polling errors
       }
     };
 
-    const interval = setInterval(syncTelemetry, 2000);
+    const interval = setInterval(syncTelemetry, 1200);
     return () => {
       isMounted = false;
       clearInterval(interval);
     };
   }, [isLiveIoTMode, alarmSnoozeUntil]);
 
+  // Dual-Function Buzzer Mode (update_buzzer(alarm_gas, alarm_seberang))
+  const alarmGas = gas.gasValue >= 1500;
+  const alarmSeberang = crossing.lampu === 'MERAH';
+  const buzzerMode: BuzzerMode =
+    alarmGas && alarmSeberang ? 'both' : alarmGas ? 'gas' : alarmSeberang ? 'seberang' : 'none';
+
   return (
     <SmartCityContext.Provider
       value={{
         activeSubsystem,
         setActiveSubsystem,
+        theme,
+        toggleTheme,
         traffic,
         pju,
         crossing,
         gas,
+        buzzerMode,
         devices,
         rules,
         alerts,
@@ -839,9 +902,11 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
         snoozePollutionAlarm,
         triggerTrafficEmergency,
         setTrafficModeAuto,
+        setTrafficLightManual,
         toggleRule,
         markAlertAsRead,
         resolveAlert,
+        clearEventLogs,
       }}
     >
       {children}

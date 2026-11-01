@@ -1,230 +1,118 @@
-# 🚀 PANDUAN LENGKAP INTEGRASI HARDWARE IoT KE DASHBOARD URBANPULSE
+# PANDUAN INTEGRASI HARDWARE ESP32 KE DASHBOARD SMARTCITY
 
-Dokumen ini menjelaskan langkah demi langkah cara menghubungkan perangkat keras fisik (seperti **ESP32, NodeMCU, Arduino, Sensor Kualitas Udara, Sensor Gerak PJU, dan Lampu Lalu Lintas**) langsung ke sistem **UrbanPulse Smart City**.
-
----
-
-## 📑 DAFTAR ISI
-1. [Ringkasan Arsitektur](#1-ringkasan-arsitektur)
-2. [Peralatan Hardware yang Dibutuhkan](#2-peralatan-hardware-yang-dibutuhkan)
-3. [Dua Jalur Komunikasi (Pilih Salah Satu)](#3-dua-jalur-komunikasi-pilih-salah-satu)
-4. [Endpoint REST API UrbanPulse (Tersedia Bawaan)](#4-endpoint-rest-api-urbanpulse)
-5. [Skema Wiring & Pinout Sensor ESP32](#5-skema-wiring--pinout-sensor-esp32)
-6. [Firmware Arduino/ESP32 Siap Pakai](#6-firmware-arduinoesp32-siap-pakai)
-7. [Uji Coba Pengiriman Data Tanpa Alat (Simulasi via cURL / Postman)](#7-uji-coba-pengiriman-data-tanpa-alat)
-8. [Troubleshooting & Checklist](#8-troubleshooting--checklist)
+Dokumen ini menjelaskan skema pinout perangkat keras ESP32 (MicroPython), protokol komunikasi serial dua arah (`COM3` / Web Serial), serta spesifikasi REST API pada sistem **SmartCity**.
 
 ---
 
-## 1. Ringkasan Arsitektur
+## 1. Skema Pinout Lengkap ESP32 (MicroPython)
 
-UrbanPulse dirancang dengan sistem **Plug and Play**. Data dapat dikirimkan dari mikrokontroler melalui jaringan WiFi lokal ataupun internet:
+Seluruh fitur dijalankan secara serentak (non-blocking) oleh satu board **ESP32** menggunakan file [`firmware/main_thonny_micropython.py`](./firmware/main_thonny_micropython.py):
 
-```
-[ Sensor Fisik ] 
-       │
-       ▼
- [ ESP32 Microcontroller ]
-       │
-       ├──► (Jalur 1: HTTP POST via WiFi) ──► Next.js API [/api/iot/telemetry] ──► Dashboard UI
-       │
-       └──► (Jalur 2: MQTT Publish)      ──► Broker (EMQX/HiveMQ)             ──► Dashboard UI
-```
-
----
-
-## 2. Peralatan Hardware yang Dibutuhkan
-
-Untuk membuat prototipe sistem Smart City lengkap (tingkat SMK / Proyek IoT):
-
-| Sub-Sistem | Komponen Utama | Sensor & Aktuator |
+### A. Layar LCD I2C 16x2 (`SoftI2C` Auto-Scan)
+| Pin LCD I2C | Pin ESP32 | Keterangan |
 | :--- | :--- | :--- |
-| **Node 1: Kualitas Udara** | ESP32 Dev Module | Sensor Debu/Gas MQ-135, Sensor Suhu/Kelembaban DHT22 |
-| **Node 2: Lampu Jalan Pintar (PJU)** | ESP32 Dev Module | Sensor Gerak PIR (HC-SR501), Sensor Cahaya LDR, LED / Relay Dimmer |
-| **Node 3: Lampu Lalu Lintas Pintar (ATSC)** | ESP32 Dev Module | Sensor Jarak Ultrasonic (HC-SR04) atau Radar, Modul LED Traffic (Merah, Kuning, Hijau) |
-| **Node 4: Penyeberangan Pintar (Pelican)** | ESP32 / Arduino Nano | Push Button Fisik, Buzzer Peringatan, LED Walk/Wait |
+| **GND** | `GND` | Ground |
+| **VCC** | `VIN` / `5V` | Tegangan kerja 5V |
+| **SCL** | `GPIO 22` (atau `21` / `19`) | Dideteksi otomatis saat startup (`freq=100000`) |
+| **SDA** | `GPIO 21` (atau `22` / `18`) | Dideteksi otomatis saat startup (`freq=100000`) |
+
+### B. Sensor Gas MQ (Monitoring Polusi Udara)
+| Pin Sensor MQ | Pin ESP32 | Keterangan |
+| :--- | :--- | :--- |
+| **VCC & GND** | `5V` & `GND` | Catu daya sensor |
+| **AO (Analog Out)** | `GPIO 39` (`VN`) | Input ADC 12-bit (`0 - 4095`), `ADC.ATTN_11DB`, `BATAS_GAS = 1500` |
+
+### C. Dua Sensor Ultrasonik HC-SR04 (Deteksi Penyeberang)
+| Sensor | Pin Komponen | Pin ESP32 | Ambang Deteksi |
+| :--- | :--- | :--- | :--- |
+| **Ultrasonik Kanan** | `TRIG` / `ECHO` | `GPIO 32` (OUT) / `GPIO 34` (IN) | `BATAS_KANAN = 17 cm` |
+| **Ultrasonik Kiri** | `TRIG` / `ECHO` | `GPIO 33` (OUT) / `GPIO 35` (IN) | `BATAS_KIRI = 25 cm` |
+
+### D. Lampu Penyeberangan & Buzzer Dua Fungsi
+| Komponen | Pin ESP32 | Fungsi |
+| :--- | :--- | :--- |
+| **LED Hijau Penyeberangan** | `GPIO 12` | Menyala saat fase `HIJAU` dan `TUNGGU_KOSONG` |
+| **LED Kuning Penyeberangan** | `GPIO 14` | Menyala selama `1000 ms` saat transisi `KUNING` |
+| **LED Merah Penyeberangan** | `GPIO 27` | Menyala selama `5000 ms` saat fase `MERAH` (orang menyeberang) |
+| **Buzzer Aktif** | `GPIO 4` | Berbunyi untuk Alarm Gas (`INTERVAL_GAS = 800ms`) dan Pola Seberang (`POLA_SEBERANG`) |
+
+### E. Sensor Cahaya LDR & Lampu Smart PJU
+| Komponen | Pin ESP32 | Fungsi |
+| :--- | :--- | :--- |
+| **Sensor LDR (AO)** | `GPIO 36` (`VP`) | Input ADC 12-bit (`THRESHOLD_LDR = 2000`: `> 2000` Gelap, `<= 2000` Terang) |
+| **LED Merah PJU** | `GPIO 25` | Menyala saat kondisi `GELAP` (mode `AUTO`) atau saat `CMD:PJU_ON` |
+| **LED Putih PJU** | `GPIO 26` | Menyala saat kondisi `GELAP` (mode `AUTO`) atau saat `CMD:PJU_ON` |
 
 ---
 
-## 3. Dua Jalur Komunikasi (Pilih Salah Satu)
+## 2. Protokol Komunikasi Serial Dua Arah (`115200` Baud)
 
-### Jalur A: HTTP REST API (Paling Mudah, Tanpa Perlu Broker Tambahan)
-- ESP32 terkoneksi ke WiFi yang sama dengan laptop/server dashboard.
-- ESP32 mengirim data dengan metode `HTTP POST` berformat JSON ke alamat IP laptop Anda (misal `http://192.168.1.50:3000/api/iot/telemetry`).
-- **Kelebihan**: Sangat mudah diprogram pada Arduino IDE, tidak membutuhkan server MQTT eksternal.
+### A. Output Telemetri dari ESP32 ke Dashboard (`[JSON]`)
+Pada akhir setiap siklus pembacaan, ESP32 mencetak satu baris JSON dengan awalan `[JSON]` melalui port serial USB:
+```text
+[JSON] {"gas": 650, "gasMode": "AUTO", "statusPolusi": "UDARA BERSIH", "jarakKanan": 35.0, "jarakKiri": 42.0, "orangKanan": false, "orangKiri": false, "lampu": "HIJAU", "ldr": 1200, "kondisi": "TERANG", "pjuStatus": "MATI", "pjuMode": "AUTO"}
+```
+Baris ini dibaca secara otomatis oleh `firmware/bridge_serial_to_dashboard.ps1` ataupun fitur **Web Serial API** di browser dan dikirimkan ke `/api/iot/telemetry`.
 
-### Jalur B: MQTT Broker (Kecepatan Tinggi & Realtime Dua Arah)
-- ESP32 dan Dashboard terhubung ke broker MQTT publik (seperti `broker.emqx.io` port `1883` atau `broker.hivemq.com`).
-- ESP32 menerbitkan (publish) data sensor ke topik: `urbanpulse/telemetry/<jenis_sensor>`.
-- ESP32 mendengarkan (subscribe) perintah kontrol dari dashboard pada topik: `urbanpulse/control/<device_id>`.
-- **Kelebihan**: Respon instan (sub-detik), sangat hemat bandwidth, mendukung kendali balik aktuator.
+### B. Input Perintah dari Dashboard ke ESP32 (`CMD:*`)
+ESP32 memeriksa perintah masuk tanpa menghentikan pembacaan sensor menggunakan `uselect.poll()` pada `sys.stdin`:
+
+| Perintah | Aksi pada Firmware ESP32 |
+| :--- | :--- |
+| `CMD:PJU_ON` | Mengatur `pju_manual_mode = "ON"`, menyalakan `led_merah` (`Pin 25`) dan `led_putih` (`Pin 26`) |
+| `CMD:PJU_OFF` | Mengatur `pju_manual_mode = "OFF"`, mematikan `led_merah` (`Pin 25`) dan `led_putih` (`Pin 26`) |
+| `CMD:PJU_AUTO` | Mengatur `pju_manual_mode = "AUTO"`, kontrol kembali mengikuti sensor LDR (`Pin 36`) |
+| `CMD:FORCE_CROSSING` | Memicu siklus penyeberangan (`fase_penyeberangan = "KUNING"`, lalu `"MERAH"`) |
+| `CMD:CROSSING_RESET` | Mengembalikan `fase_penyeberangan = "HIJAU"` dan `siap_menyeberang = True` |
+| `CMD:BUZZER_TEST` | Menyalakan buzzer (`Pin 4`) selama `300 ms` lalu mematikannya kembali |
+| `CMD:BUZZER_MUTE` | Mematikan bunyi buzzer dan mereset alarm penyeberangan |
+| `CMD:GAS_AUTO` | Mengembalikan pembacaan gas ke sensor fisik `ADC Pin 39` |
+| `CMD:GAS_SET:<nilai>` | Mengatur nilai simulasi gas manual pada variabel `nilai_gas_manual` |
 
 ---
 
-## 4. Endpoint REST API UrbanPulse
+## 3. Spesifikasi Endpoint REST API SmartCity
 
-Sistem Next.js UrbanPulse telah dilengkapi dengan API Ingestion siap pakai:
-
-### A. Kirim Data Sensor (Telemetry Ingestion)
-- **URL**: `http://<IP_SERVER>:3000/api/iot/telemetry`
-- **Metode**: `POST`
-- **Headers**: `Content-Type: application/json`
-
-#### Contoh Payload 1: Kualitas Udara
+### A. Kirim Telemetri (`POST /api/iot/telemetry`)
+Contoh pengiriman paket gabungan (`miniature-all`):
 ```json
 {
-  "deviceId": "ESP32-AIR-01",
-  "type": "air-quality",
-  "zone": "Kawasan Industri & Sudirman",
+  "deviceId": "ESP32-MINIATURE",
+  "type": "miniature-all",
   "payload": {
-    "aqi": 84,
-    "pm25": 38.5,
-    "co": 1.4,
-    "co2": 520,
-    "temperature": 31.2,
-    "humidity": 68.0
-  }
-}
-```
-
-#### Contoh Payload 2: Lampu Jalan PJU
-```json
-{
-  "deviceId": "ESP32-PJU-01",
-  "type": "pju",
-  "nodeId": "pju-1",
-  "payload": {
-    "brightness": 90,
-    "powerWatts": 120,
-    "motionDetected": true,
-    "status": "optimal"
-  }
-}
-```
-
-#### Contoh Payload 3: Kepadatan Lalu Lintas
-```json
-{
-  "deviceId": "ESP32-TRAFFIC-01",
-  "type": "traffic",
-  "intersectionId": "int-1",
-  "payload": {
-    "density": 78,
-    "vehicleCount": 1450,
-    "avgSpeedKmh": 24,
-    "queueLengthMeters": 140,
-    "currentLight": "green"
-  }
-}
-```
-
----
-
-### B. Kirim Perintah Kontrol / Aksi Aktuator
-- **URL**: `http://<IP_SERVER>:3000/api/iot/control`
-- **Metode**: `POST`
-- **Format Body**:
-```json
-{
-  "targetDeviceId": "ESP32-PJU-01",
-  "action": "SET_BRIGHTNESS",
-  "value": 100,
-  "timestamp": "2026-09-20T14:30:00Z"
-}
-```
-
----
-
-## 5. Skema Wiring & Pinout Sensor ESP32
-
-### A. Node Sensor Kualitas Udara (MQ-135 + Monitor Hijau LCD + 2 LED)
-| Pin ESP32 | Pin Komponen | Keterangan |
-| :--- | :--- | :--- |
-| **VIN / 5V** | VCC Sensor MQ-135 & VCC LCD I2C | Sumber daya 5V |
-| **GND** | GND Semua Komponen | Ground bersama |
-| **GPIO 34 / 39 (Analog)** | Pin AO (Analog Out) MQ-135 | Pembacaan kadar gas |
-| **GPIO 4 (Digital)** | Pin DATA DHT22 | Pembacaan Suhu & Kelembaban |
-| **GPIO 21 (I2C SDA)** | Pin SDA Modul LCD 16x2 I2C | Data Serial Monitor Hijau |
-| **GPIO 22 (I2C SCL)** | Pin SCL Modul LCD 16x2 I2C | Clock Serial Monitor Hijau |
-| **GPIO 18 (Digital Out)** | Anoda (+) LED Peringatan Polusi | LED Merah/Kuning (Menyala saat polusi tinggi) |
-| **GPIO 19 (Digital Out)** | Anoda (+) LED Udara Bersih | LED Hijau (Menyala saat udara bersih) |
-
----
-
-### B. Node Lampu Jalan Pintar (PIR Sensor + PWM LED)
-| Pin ESP32 | Pin Komponen | Keterangan |
-| :--- | :--- | :--- |
-| **3V3 / 5V** | VCC Sensor PIR HC-SR501 | Daya sensor gerak |
-| **GND** | GND PIR & Katoda LED (-) | Ground |
-| **GPIO 13 (Input)** | Pin OUT Sensor PIR | Deteksi pejalan/kendaraan lewat |
-| **GPIO 25 (PWM Output)** | Anoda LED (+) via resistor 220Ω | Kontrol kecerahan lampu PJU |
-
----
-
-### C. Node Lampu Lalu Lintas Adaptif (Ultrasonic + Traffic LED)
-| Pin ESP32 | Pin Komponen | Keterangan |
-| :--- | :--- | :--- |
-| **5V & GND** | VCC & GND HC-SR04 & LED Modul | Daya |
-| **GPIO 5 (Output)** | Pin TRIG Ultrasonic | Trigger pulsa suara |
-| **GPIO 18 (Input)** | Pin ECHO Ultrasonic | Penerima pantulan pulsa |
-| **GPIO 19** | LED Merah | Lampu Berhenti |
-| **GPIO 21** | LED Kuning | Lampu Hati-Hati |
-| **GPIO 22** | LED Hijau | Lampu Jalan |
-
----
-
-## 6. Firmware Arduino/ESP32 Siap Pakai
-
-Semua kode program lengkap untuk di-upload melalui **Arduino IDE** telah kami sediakan di dalam folder:
-`firmware/`
-
-1. `firmware/esp32_air_quality.ino` : Node Sensor Udara & Emisi Gas.
-2. `firmware/esp32_smart_pju.ino` : Node Lampu Jalan Otomatis Adaptif.
-3. `firmware/esp32_traffic_light.ino` : Node Lampu Lalu Lintas Cerdas.
-4. `firmware/esp32_pelican_crossing.ino` : Node Tombol Penyeberangan Pejalan Kaki.
-
-### Langkah Upload ke ESP32:
-1. Buka aplikasi **Arduino IDE**.
-2. Masuk ke menu `File` > `Preferences`, tambahkan URL Board ESP32:
-   `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`
-3. Masuk ke `Tools` > `Manage Libraries`, pasang library berikut:
-   - **ArduinoJson** (oleh Benoit Blanchon)
-   - **DHT sensor library** (oleh Adafruit)
-4. Buka salah satu file `.ino` di folder `firmware/`.
-5. Sesuaikan nama WiFi (`ssid`), password WiFi, serta alamat IP Laptop Anda (`serverUrl`).
-6. Sambungkan kabel USB ke ESP32 dan klik tombol **Upload**.
-
----
-
-## 7. Uji Coba Pengiriman Data Tanpa Alat (Simulasi via cURL / Postman)
-
-Anda dapat menguji apakah sistem UrbanPulse berhasil menerima data dengan menjalankan perintah berikut di terminal (PowerShell atau Command Prompt):
-
-```powershell
-curl -X POST http://localhost:3000/api/iot/telemetry `
-  -H "Content-Type: application/json" `
-  -d '{
-    "deviceId": "TEST-NODE-01",
-    "type": "air-quality",
-    "zone": "Kawasan Industri",
-    "payload": {
-      "aqi": 185,
-      "pm25": 110.2,
-      "co": 3.8,
-      "co2": 890,
-      "temperature": 34.5,
-      "humidity": 55.0
+    "gas": {
+      "gasValue": 650,
+      "gasMode": "AUTO",
+      "statusPolusi": "UDARA BERSIH"
+    },
+    "crossing": {
+      "jarakKanan": 35.0,
+      "jarakKiri": 42.0,
+      "orangKanan": false,
+      "orangKiri": false,
+      "lampu": "HIJAU",
+      "buzzer": false,
+      "siapMenyeberang": true
+    },
+    "pju": {
+      "ldrValue": 1200,
+      "kondisi": "TERANG",
+      "pjuStatus": "MATI",
+      "pjuMode": "AUTO",
+      "ledMerah": false,
+      "ledPutih": false
     }
-  }'
+  }
+}
 ```
 
-Setelah perintah tersebut dieksekusi, status kualitas udara pada dashboard UrbanPulse akan seketika berubah warna menjadi merah (Peringatan Kritis / Polusi Tinggi).
+### B. Kirim Perintah Kontrol (`POST /api/iot/control`)
+```json
+{
+  "targetDeviceId": "ESP32-MINIATURE",
+  "action": "CMD:FORCE_CROSSING"
+}
+```
 
----
-
-## 8. Troubleshooting & Checklist
-
-- [ ] **Laptop dan ESP32 harus berada di jaringan WiFi yang sama**.
-- [ ] **Cek IP Laptop**: Buka terminal dan ketik `ipconfig`, cari bagian *IPv4 Address* (contoh: `192.168.1.15`). Gunakan IP ini di kode ESP32, jangan gunakan `localhost` karena ESP32 tidak mengenali localhost laptop.
-- [ ] **Pastikan port 3000 tidak terblokir Windows Firewall**: Jika ESP32 gagal mengirim HTTP (error code `-1`), berikan izin port 3000 pada Windows Defender Firewall.
-- [ ] **Cek Serial Monitor Arduino IDE** pada kecepatan baud `115200` untuk melihat status koneksi WiFi dan status HTTP response code dari dashboard.
+### C. Polling Antrean Perintah (`GET /api/iot/control?deviceId=ESP32-MINIATURE`)
+Mengembalikan daftar perintah berstatus `PENDING` untuk dieksekusi oleh jembatan serial ke port `COM3`, lalu menandainya sebagai `DISPATCHED`.

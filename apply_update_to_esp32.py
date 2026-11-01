@@ -63,12 +63,12 @@ def done():
     print("Hasil simpan:", res.strip())
 
 # Upload library LCD
-upload_file(r"c:\Users\nadem\OneDrive\Documents\urbanpulse\lcd_api.py", "lcd_api.py")
-upload_file(r"c:\Users\nadem\OneDrive\Documents\urbanpulse\esp8266_i2c_lcd.py", "esp8266_i2c_lcd.py")
-upload_file(r"c:\Users\nadem\OneDrive\Documents\urbanpulse\i2c_lcd.py", "i2c_lcd.py")
+upload_file(r"lcd_api.py", "lcd_api.py")
+upload_file(r"esp8266_i2c_lcd.py", "esp8266_i2c_lcd.py")
+upload_file(r"i2c_lcd.py", "i2c_lcd.py")
 
 # Upload main_thonny_micropython.py sebagai main.py
-upload_file(r"c:\Users\nadem\OneDrive\Documents\urbanpulse\firmware\main_thonny_micropython.py", "main.py")
+upload_file(r"firmware\main_thonny_micropython.py", "main.py")
 
 # Verifikasi file di ESP32
 print("\n--- Verifikasi File di ESP32 ---")

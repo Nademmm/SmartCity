@@ -1,6 +1,6 @@
 /*
   =============================================================
-  UrbanPulse Smart City - ESP32 Smart Pelican Crossing
+  SMARTCITY Smart City - ESP32 Smart Pelican Crossing
   =============================================================
   Sensor: Push Button Penyeberang (Pin 4)
   Aktuator: Buzzer Beep (Pin 14), LED WALK (Pin 26), LED WAIT (Pin 27)

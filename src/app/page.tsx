@@ -1,8 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import { SmartCityProvider, useSmartCity } from '@/context/SmartCityContext';
-import { Sidebar } from '@/components/layout/Sidebar';
 import { Topbar } from '@/components/layout/Topbar';
 
 import { OverviewView } from '@/components/views/OverviewView';
@@ -15,20 +14,19 @@ import { PollutionAlarmModal } from '@/components/common/PollutionAlarmModal';
 
 const DashboardContent: React.FC = () => {
   const { activeSubsystem } = useSmartCity();
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const renderActiveView = () => {
     switch (activeSubsystem) {
       case 'overview':
         return <OverviewView />;
-      case 'traffic':
-        return <TrafficView />;
-      case 'lighting':
-        return <LightingView />;
-      case 'pedestrian':
-        return <PedestrianView />;
       case 'air-quality':
         return <AirQualityView />;
+      case 'pedestrian':
+        return <PedestrianView />;
+      case 'lighting':
+        return <LightingView />;
+      case 'traffic':
+        return <TrafficView />;
       case 'alerts':
         return <AlertsView />;
       default:
@@ -37,26 +35,12 @@ const DashboardContent: React.FC = () => {
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[#e8e4dc] text-[#25282b]">
-      {/* Pollution Emergency Alarm Modal */}
+    <div className="min-h-dvh flex flex-col bg-[var(--bg-canvas)] text-[var(--text-primary)]">
       <PollutionAlarmModal />
-
-      {/* Navigation Sidebar */}
-      <Sidebar
-        isOpen={isMobileMenuOpen}
-        onClose={() => setIsMobileMenuOpen(false)}
-      />
-
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
-        <Topbar onOpenMobileMenu={() => setIsMobileMenuOpen(true)} />
-
-        <main className="flex-1 overflow-y-auto p-3.5 sm:p-5 lg:p-6 pb-12">
-          <div className="max-w-6xl mx-auto">
-            {renderActiveView()}
-          </div>
-        </main>
-      </div>
+      <Topbar />
+      <main className="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-6 pt-4 pb-24 lg:pb-8">
+        {renderActiveView()}
+      </main>
     </div>
   );
 };

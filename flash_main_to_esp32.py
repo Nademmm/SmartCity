@@ -3,7 +3,7 @@ import time
 import base64
 import os
 
-source_file = r"c:\Users\nadem\OneDrive\Documents\urbanpulse\firmware\main_thonny_micropython.py"
+source_file = r"firmware\main_thonny_micropython.py"
 
 print("Membaca file firmware lokal...")
 with open(source_file, "rb") as f:

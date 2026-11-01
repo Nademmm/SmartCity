@@ -1,49 +1,46 @@
-from machine import Pin, ADC, I2C, time_pulse_us
+from machine import Pin, ADC, I2C, SoftI2C, time_pulse_us
 import time
 import sys
 import uselect
 from i2c_lcd import I2cLcd
 
 # ==================================================
-# 1. LCD I2C (Otomatis Mendeteksi Pin SCL & SDA)
+# 1. LCD I2C (Otomatis Mendeteksi Pin SCL & SDA + SoftI2C)
 # ==================================================
 i2c = None
 alamat_lcd = []
 
-for scl_p, sda_p in [(22, 21), (21, 22)]:
+# Coba pasangan pin GPIO umum untuk ESP32
+for scl_p, sda_p in [(22, 21), (21, 22), (19, 18)]:
     try:
-        temp_i2c = I2C(0, scl=Pin(scl_p), sda=Pin(sda_p), freq=100000)
+        temp_i2c = SoftI2C(scl=Pin(scl_p), sda=Pin(sda_p), freq=100000)
         scan_res = temp_i2c.scan()
         if len(scan_res) > 0:
             i2c = temp_i2c
             alamat_lcd = scan_res
-            print(f"Alamat I2C terdeteksi (SCL={scl_p}, SDA={sda_p}):", [hex(x) for x in alamat_lcd])
+            print(f"[I2C OK] Terdeteksi pada SCL={scl_p}, SDA={sda_p} -> Alamat: {[hex(x) for x in alamat_lcd]}")
             break
-    except Exception:
+    except Exception as e:
         pass
 
-if i2c is None:
-    i2c = I2C(0, scl=Pin(21), sda=Pin(22), freq=100000)
-    alamat_lcd = i2c.scan()
-    print("Alamat I2C:", alamat_lcd)
-
 lcd = None
-if len(alamat_lcd) > 0:
+if i2c is not None and len(alamat_lcd) > 0:
     try:
+        # Menggunakan alamat pertama yang ditemukan dari hasil scan
         lcd = I2cLcd(i2c, alamat_lcd[0], 2, 16)
         lcd.clear()
         lcd.move_to(0, 0)
-        lcd.putstr("URBANPULSE")
+        lcd.putstr("SELAMAT DATANG")
         lcd.move_to(0, 1)
-        lcd.putstr("Monitoring Gas")
-        time.sleep(2)
+        lcd.putstr("DI SMART CITY")
+        time.sleep(5)
         lcd.clear()
         print("[LCD] Berhasil terhubung dan teks ditampilkan!")
     except Exception as e:
         lcd = None
-        print("LCD bermasalah:", e)
+        print("[LCD ERR] Gagal inisialisasi LCD:", e)
 else:
-    print("LCD tidak terdeteksi!")
+    print("[I2C ERR] Perangkat LCD I2C tidak terdeteksi sama sekali!")
 
 # ==================================================
 # 2. SENSOR GAS MQ
@@ -83,16 +80,6 @@ led_merah_penyeberangan = Pin(27, Pin.OUT)
 
 buzzer = Pin(4, Pin.OUT)
 
-# LED Indikator Gas / Kualitas Udara
-try:
-    led_polusi_gas = Pin(18, Pin.OUT)
-    led_bersih_gas = Pin(19, Pin.OUT)
-    led_polusi_gas.off()
-    led_bersih_gas.on()
-except Exception:
-    led_polusi_gas = None
-    led_bersih_gas = None
-
 # ==================================================
 # 6. PENGATURAN & KONTROL JARINGAN
 # ==================================================
@@ -124,7 +111,6 @@ def cek_perintah_jaringan():
 
             print(">>> PERINTAH DITERIMA:", line)
 
-            # 1. KONTROL SMART PJU
             if line == "CMD:PJU_ON":
                 pju_manual_mode = "ON"
                 led_merah.on()
@@ -141,8 +127,7 @@ def cek_perintah_jaringan():
                 pju_manual_mode = "AUTO"
                 print(">>> STATUS PJU: OTOMATIS SENSOR LDR")
 
-            # 2. KONTROL PENYEBERANGAN (PELICAN CROSSING)
-            elif line in ["CMD:FORCE_CROSSING", "CMD:CROSSING_TRIGGER"]:
+            elif line in ("CMD:FORCE_CROSSING", "CMD:CROSSING_TRIGGER"):
                 if fase_penyeberangan == "HIJAU":
                     siap_menyeberang = False
                     fase_penyeberangan = "KUNING"
@@ -150,19 +135,18 @@ def cek_perintah_jaringan():
                     print(">>> PENYEBERANGAN DIPAKSA AKTIF DARI WEB!")
 
             elif line == "CMD:CROSSING_RESET":
-                fase_penyeberangan = "HIJAU"
                 siap_menyeberang = True
+                fase_penyeberangan = "HIJAU"
                 waktu_fase = time.ticks_ms()
                 led_hijau.on()
                 led_kuning.off()
                 led_merah_penyeberangan.off()
                 buzzer.off()
-                print(">>> PENYEBERANGAN DIRESET AMAN (HIJAU)")
+                print(">>> PENYEBERANGAN DIRESET KE HIJAU")
 
-            # 3. KONTROL BUZZER
-            elif line in ["CMD:BUZZER_TEST", "CMD:ALARM_TEST"]:
+            elif line in ("CMD:BUZZER_TEST", "CMD:ALARM_TEST"):
                 buzzer.on()
-                time.sleep_ms(350)
+                time.sleep_ms(300)
                 buzzer.off()
                 print(">>> UJI BUZZER SUKSES")
 
@@ -170,10 +154,9 @@ def cek_perintah_jaringan():
                 buzzer.off()
                 print(">>> BUZZER DIBISUKAN")
 
-            # 4. KONTROL SENSOR GAS & SIMULASI POLUSI DARI DEVICE
             elif line == "CMD:GAS_AUTO":
                 gas_override_mode = "AUTO"
-                print(">>> STATUS GAS: MODE OTOMATIS SENSOR FISIK PIN 39")
+                print(">>> STATUS GAS: OTOMATIS SENSOR MQ PIN 39")
 
             elif line == "CMD:GAS_BERSIH":
                 gas_override_mode = "MANUAL"
@@ -187,20 +170,18 @@ def cek_perintah_jaringan():
                 buzzer.off()
                 print(">>> STATUS GAS: MANUAL POLUSI SEDANG (1250)")
 
-            elif line in ["CMD:GAS_TINGGI", "CMD:GAS_BAHAYA"]:
+            elif line in ("CMD:GAS_TINGGI", "CMD:GAS_BAHAYA"):
                 gas_override_mode = "MANUAL"
                 nilai_gas_manual = 2100
                 print(">>> STATUS GAS: MANUAL POLUSI TINGGI (2100)")
 
             elif line.startswith("CMD:GAS_SET:"):
                 try:
-                    val_str = line.split(":")[2]
-                    nilai_gas_manual = int(val_str)
+                    nilai_gas_manual = int(line.split(":")[2])
                     gas_override_mode = "MANUAL"
-                    print(">>> STATUS GAS: MANUAL DITETAPKAN KE", nilai_gas_manual)
+                    print(">>> STATUS GAS: MANUAL SET KE", nilai_gas_manual)
                 except Exception as ex:
                     print("[ERR_GAS_SET]", ex)
-
         except Exception as err:
             print("[ERR_CMD]", err)
 
@@ -348,7 +329,7 @@ while True:
     cek_perintah_jaringan()
 
     print("\n================================")
-    print("    URBANPULSE SMART CITY")
+    print("      SISTEM SMART CITY")
     print("================================")
 
     # ----------------------------------------------
@@ -368,20 +349,8 @@ while True:
 
     alarm_gas = nilai_gas >= BATAS_GAS
 
-    if led_polusi_gas is not None:
-        if alarm_gas or status_polusi == "POLUSI SEDANG":
-            led_polusi_gas.on()
-        else:
-            led_polusi_gas.off()
-
-    if led_bersih_gas is not None:
-        if not alarm_gas:
-            led_bersih_gas.on()
-        else:
-            led_bersih_gas.off()
-
     print("\nMONITORING POLUSI")
-    print("Nilai gas:", nilai_gas, f"({gas_override_mode})")
+    print("Nilai gas:", nilai_gas)
     print("Status:", status_polusi)
 
     if lcd is not None:

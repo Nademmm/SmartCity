@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 
 export async function GET() {
-  const latestTelemetry = global.__urbanpulse_latest_telemetry || {};
+  const latestTelemetry = global.__smartcity_latest_telemetry || {};
   const activeDevices = Object.keys(latestTelemetry);
 
   return NextResponse.json({
     status: 'ONLINE',
-    service: 'UrbanPulse IoT Gateway Engine',
+    service: 'SmartCity IoT Gateway Engine',
     timestamp: new Date().toISOString(),
     endpoints: {
       telemetry: '/api/iot/telemetry',

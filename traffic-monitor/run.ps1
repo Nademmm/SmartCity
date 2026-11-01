@@ -1,6 +1,6 @@
-# UrbanPulse - YOLO11 Traffic Monitor Launcher
+# SMARTCITY - YOLO11 Traffic Monitor Launcher
 Write-Host "========================================================" -ForegroundColor Cyan
-Write-Host " UrbanPulse - Menjalankan AI Traffic Monitor (Webcam)" -ForegroundColor Cyan
+Write-Host " SMARTCITY - Menjalankan AI Traffic Monitor (Webcam)" -ForegroundColor Cyan
 Write-Host "========================================================" -ForegroundColor Cyan
 
 if (Test-Path ".\.venv\Scripts\python.exe") {

@@ -1,9 +1,9 @@
 @echo off
-title UrbanPulse - Cloudflare Public Internet Tunnel
+title SmartCity - Cloudflare Public Internet Tunnel
 cd /d "%~dp0"
 
 echo =====================================================================
-echo         URBANPULSE SMART CITY: CLOUDFLARE PUBLIC TUNNEL
+echo          SMARTCITY ESP32: CLOUDFLARE PUBLIC TUNNEL
 echo =====================================================================
 echo.
 echo Mengaktifkan tunnel publik untuk port 3000...

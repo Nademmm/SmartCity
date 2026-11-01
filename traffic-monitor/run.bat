@@ -1,9 +1,9 @@
 @echo off
-title UrbanPulse - YOLO11 Traffic Monitor (Webcam)
+title SMARTCITY - YOLO11 Traffic Monitor (Webcam)
 cd /d "%~dp0"
 
 echo ========================================================
-echo  UrbanPulse - Menjalankan AI Traffic Monitor (Webcam)
+echo  SMARTCITY - Menjalankan AI Traffic Monitor (Webcam)
 echo ========================================================
 echo.
 

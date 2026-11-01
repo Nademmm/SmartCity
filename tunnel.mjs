@@ -1,7 +1,7 @@
 import { startTunnel } from "untun";
 
 console.log("==========================================================");
-console.log("     URBANPULSE SMART CITY: CLOUDFLARE PUBLIC TUNNEL      ");
+console.log("      SMARTCITY ESP32: CLOUDFLARE PUBLIC TUNNEL           ");
 console.log("==========================================================");
 console.log("Menghubungkan localhost:3000 ke jaringan internet publik...");
 

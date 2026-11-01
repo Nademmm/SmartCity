@@ -1,6 +1,6 @@
 /*
   =============================================================
-  UrbanPulse Smart City - ESP32 Air Quality Sensor Node
+  SMARTCITY Smart City - ESP32 Air Quality Sensor Node
   =============================================================
   Sensor: MQ-135 (Air Quality/Gas) & DHT22 (Temp & Humidity)
   Output:
@@ -8,7 +8,7 @@
     - [REVISI] LED Peringatan Polusi: Pin 18 (Merah/Kuning)
     - [REVISI] LED Udara Bersih: Pin 19 (Hijau)
   Protocol: HTTP POST (REST API)
-  Author: UrbanPulse Engineering
+  Author: SMARTCITY Engineering
   =============================================================
 */
 
@@ -19,7 +19,7 @@
 #include <LiquidCrystal_I2C.h>
 #include "DHT.h"
 
-// 1. Konfigurasi Jaringan WiFi & Server UrbanPulse
+// 1. Konfigurasi Jaringan WiFi & Server SMARTCITY
 const char* ssid = "NAMA_WIFI_ANDA";
 const char* password = "PASSWORD_WIFI_ANDA";
 
@@ -153,7 +153,7 @@ void sendTelemetryData() {
     }
   }
 
-  // 2. Siapkan dokumen JSON sesuai format UrbanPulse
+  // 2. Siapkan dokumen JSON sesuai format SMARTCITY
   StaticJsonDocument<350> doc;
   doc["deviceId"] = "ESP32-AIR-01";
   doc["type"] = "air-quality";

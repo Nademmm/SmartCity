@@ -10,7 +10,7 @@ logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(m
 class DashboardClient:
     """
     Klien Asinkron untuk mengirim data telemetri hasil deteksi YOLO11
-    ke Next.js REST API Ingestion Endpoint (/api/iot/telemetry) UrbanPulse.
+    ke Next.js REST API Ingestion Endpoint (/api/iot/telemetry) SMARTCITY.
     Menjalankan background worker thread agar tidak menghambat FPS OpenCV.
     """
     def __init__(self, api_url=config.DASHBOARD_API_URL, interval=config.TELEMETRY_INTERVAL_SEC):
@@ -70,7 +70,7 @@ class DashboardClient:
                 speed_kmh = 52
                 queue_meters = total * 3
 
-            # Format JSON Payload sesuai standar Ingestion UrbanPulse Dashboard
+            # Format JSON Payload sesuai standar Ingestion SMARTCITY Dashboard
             payload = {
                 "deviceId": config.DEVICE_ID,
                 "type": "traffic",

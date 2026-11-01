@@ -59,7 +59,7 @@ class Visualizer:
         cv2.addWeighted(overlay, 0.85, annotated_frame, 0.15, 0, annotated_frame)
 
         # 3. Header HUD Title
-        cv2.putText(annotated_frame, "URBANPULSE AI", (x_panel + 10, y_panel + 20),
+        cv2.putText(annotated_frame, "SMARTCITY AI", (x_panel + 10, y_panel + 20),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 200, 50), 1, cv2.LINE_AA)
         
         fps_text = f"{fps:.1f} FPS"

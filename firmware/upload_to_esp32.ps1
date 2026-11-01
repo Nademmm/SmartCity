@@ -1,5 +1,5 @@
 # ==========================================================
-# URBANPULSE - SCRIPT UPLOAD FIRMWARE KE ESP32 (COM3)
+# SMARTCITY - SCRIPT UPLOAD FIRMWARE KE ESP32 (COM3)
 # ==========================================================
 $ErrorActionPreference = "Stop"
 Write-Host "Mengunggah firmware MicroPython ke ESP32..." -ForegroundColor Cyan

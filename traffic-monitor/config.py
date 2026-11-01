@@ -65,7 +65,7 @@ THRESHOLD_LANCAR = int(os.getenv("THRESHOLD_LANCAR", "5"))
 THRESHOLD_MACET = int(os.getenv("THRESHOLD_MACET", "10"))
 
 # ==============================================================
-# 4. Integrasi Dashboard Next.js (UrbanPulse Command Center)
+# 4. Integrasi Dashboard Next.js (SMARTCITY Command Center)
 # ==============================================================
 ENABLE_DASHBOARD_SYNC = os.getenv("ENABLE_DASHBOARD_SYNC", "true").lower() == "true"
 DASHBOARD_API_URL = os.getenv("DASHBOARD_API_URL", "http://localhost:3000/api/iot/telemetry")

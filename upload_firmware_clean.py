@@ -2,7 +2,7 @@ import serial
 import time
 import hashlib
 
-source_path = r"c:\Users\nadem\OneDrive\Documents\urbanpulse\firmware\main_thonny_micropython.py"
+source_path = r"firmware\main_thonny_micropython.py"
 
 with open(source_path, "rb") as f:
     local_data = f.read()

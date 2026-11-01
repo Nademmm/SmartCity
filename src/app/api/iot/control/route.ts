@@ -10,11 +10,11 @@ export interface CommandPacket {
 }
 
 declare global {
-  var __urbanpulse_commands_queue: CommandPacket[] | undefined;
+  var __smartcity_commands_queue: CommandPacket[] | undefined;
 }
 
-if (!global.__urbanpulse_commands_queue) {
-  global.__urbanpulse_commands_queue = [];
+if (!global.__smartcity_commands_queue) {
+  global.__smartcity_commands_queue = [];
 }
 
 export async function POST(request: Request) {
@@ -41,9 +41,9 @@ export async function POST(request: Request) {
       status: 'PENDING',
     };
 
-    global.__urbanpulse_commands_queue!.unshift(command);
-    if (global.__urbanpulse_commands_queue!.length > 50) {
-      global.__urbanpulse_commands_queue!.pop();
+    global.__smartcity_commands_queue!.unshift(command);
+    if (global.__smartcity_commands_queue!.length > 50) {
+      global.__smartcity_commands_queue!.pop();
     }
 
     return NextResponse.json({
@@ -67,13 +67,13 @@ export async function GET(request: Request) {
   if (!deviceId) {
     return NextResponse.json({
       success: true,
-      totalQueued: global.__urbanpulse_commands_queue?.length || 0,
-      allCommands: global.__urbanpulse_commands_queue || [],
+      totalQueued: global.__smartcity_commands_queue?.length || 0,
+      allCommands: global.__smartcity_commands_queue || [],
     });
   }
 
   // Ambil perintah tertunda untuk deviceId ini
-  const pendingCommands = (global.__urbanpulse_commands_queue || []).filter(
+  const pendingCommands = (global.__smartcity_commands_queue || []).filter(
     (cmd) => cmd.targetDeviceId === deviceId && cmd.status === 'PENDING'
   );
 
