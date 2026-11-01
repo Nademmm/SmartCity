@@ -1,0 +1,10 @@
+node_modules
+.next
+.git
+traffic-monitor
+yolo11_traffic
+firmware
+*.py
+*.bat
+*.ps1
+

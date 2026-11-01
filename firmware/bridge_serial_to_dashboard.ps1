@@ -6,7 +6,10 @@
 
 $portName = "COM3"
 $baudRate = 115200
-$apiUrl = "http://127.0.0.1:3000/api/iot/telemetry"
+$baseUrls = @(
+    "https://smartcity-esp32.vercel.app",
+    "http://127.0.0.1:3000"
+)
 
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "     SMARTCITY ESP32 - SERIAL BRIDGE KE DASHBOARD (COM3)  " -ForegroundColor Cyan
@@ -167,26 +170,38 @@ while ($true) {
                     }
 
                     $jsonBody = ConvertTo-Json -InputObject $bodyObj -Depth 5 -Compress
-                    try {
-                        $postRes = Invoke-RestMethod -Uri $apiUrl -Method Post -Body $jsonBody -ContentType "application/json" -TimeoutSec 2
-                        Write-Host "-> Terkirim: Gas=$currentGas ($currentStatusPolusi), LDR=$currentLdr ($currentPjuMode), Seberang=$currentLampu" -ForegroundColor Green
-                    } catch {
-                        Write-Host "x Gagal kirim ke Dashboard: $($_.Exception.Message)" -ForegroundColor Red
+                    foreach ($baseUrl in $baseUrls) {
+                        try {
+                            $postRes = Invoke-RestMethod -Uri "$baseUrl/api/iot/telemetry" -Method Post -Body $jsonBody -ContentType "application/json" -TimeoutSec 2
+                            Write-Host "-> Terkirim ($baseUrl): Gas=$currentGas ($currentStatusPolusi), LDR=$currentLdr ($currentPjuMode), Seberang=$currentLampu" -ForegroundColor Green
+                            if ($postRes.commands -and $postRes.commands.Count -gt 0) {
+                                foreach ($cmdItem in $postRes.commands) {
+                                    Write-Host ">> MENERUSKAN PERINTAH KE ESP32 ($baseUrl): $($cmdItem.action)" -ForegroundColor Magenta
+                                    $port.WriteLine($cmdItem.action)
+                                }
+                            }
+                        } catch {
+                            if ($baseUrl -like "https://*") {
+                                Write-Host "x Gagal kirim ke Cloud ($baseUrl): $($_.Exception.Message)" -ForegroundColor Red
+                            }
+                        }
                     }
                 }
 
                 # Periksa dan kirim perintah kontrol tertunda dari Dashboard ke ESP32
                 if (($now - $lastCommandPollTime).TotalMilliseconds -ge 350) {
                     $lastCommandPollTime = $now
-                    try {
-                        $controlRes = Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/iot/control?deviceId=ESP32-MINIATURE" -Method Get -TimeoutSec 2
-                        if ($controlRes.commands -and $controlRes.commands.Count -gt 0) {
-                            foreach ($cmdItem in $controlRes.commands) {
-                                Write-Host ">> MENERUSKAN PERINTAH KE ESP32: $($cmdItem.action)" -ForegroundColor Magenta
-                                $port.WriteLine($cmdItem.action)
+                    foreach ($baseUrl in $baseUrls) {
+                        try {
+                            $controlRes = Invoke-RestMethod -Uri "$baseUrl/api/iot/control?deviceId=ESP32-MINIATURE" -Method Get -TimeoutSec 2
+                            if ($controlRes.commands -and $controlRes.commands.Count -gt 0) {
+                                foreach ($cmdItem in $controlRes.commands) {
+                                    Write-Host ">> MENERUSKAN PERINTAH KE ESP32 ($baseUrl): $($cmdItem.action)" -ForegroundColor Magenta
+                                    $port.WriteLine($cmdItem.action)
+                                }
                             }
-                        }
-                    } catch {}
+                        } catch {}
+                    }
                 }
             } catch [System.TimeoutException] {
                 # Timeout normal saat tidak ada baris baru masuk dalam rentang timeout

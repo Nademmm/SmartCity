@@ -1,31 +1,29 @@
 import { NextResponse } from 'next/server';
+import {
+  TelemetryPacket,
+  readIoTStore,
+  writeIoTStore,
+  enqueueCommand,
+  popPendingCommands,
+} from '@/lib/iotStore';
 
-export interface TelemetryPacket {
-  deviceId: string;
-  type: string;
-  timestamp: string;
-  zone?: string;
-  nodeId?: string;
-  intersectionId?: string;
-  crossingId?: string;
-  payload: Record<string, any>;
-}
-
-declare global {
-  var __smartcity_latest_telemetry: Record<string, TelemetryPacket> | undefined;
-  var __smartcity_telemetry_history: TelemetryPacket[] | undefined;
-}
-
-if (!global.__smartcity_latest_telemetry) {
-  global.__smartcity_latest_telemetry = {};
-}
-if (!global.__smartcity_telemetry_history) {
-  global.__smartcity_telemetry_history = [];
-}
+export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
+
+    // Dukungan antrean perintah langsung di endpoint yang sama (agar 1 serverless instance dengan telemetri)
+    if (body.action && (body.targetDeviceId || body.deviceId)) {
+      const targetId = body.targetDeviceId || body.deviceId || 'ESP32-MINIATURE';
+      const command = enqueueCommand(targetId, body.action, body.value);
+      return NextResponse.json({
+        success: true,
+        message: `Command '${body.action}' queued for device ${targetId}`,
+        command,
+      });
+    }
+
     const { deviceId, type, payload, zone, nodeId, intersectionId, crossingId } = body;
 
     if (!deviceId || !type || !payload) {
@@ -38,6 +36,8 @@ export async function POST(request: Request) {
       );
     }
 
+    const store = readIoTStore();
+
     const packet: TelemetryPacket = {
       deviceId,
       type,
@@ -49,14 +49,12 @@ export async function POST(request: Request) {
       payload,
     };
 
-    // Simpan data terbaru
-    global.__smartcity_latest_telemetry![type] = packet;
-    global.__smartcity_latest_telemetry![deviceId] = packet;
+    store.latestTelemetry[type] = packet;
+    store.latestTelemetry[deviceId] = packet;
 
-    // Jika mengirim paket all-in-one miniatur
     if (type === 'miniature-all') {
       if (payload.gas) {
-        global.__smartcity_latest_telemetry!['air-quality'] = {
+        store.latestTelemetry['air-quality'] = {
           deviceId,
           type: 'air-quality',
           timestamp: packet.timestamp,
@@ -64,7 +62,7 @@ export async function POST(request: Request) {
         };
       }
       if (payload.crossing) {
-        global.__smartcity_latest_telemetry!['pedestrian'] = {
+        store.latestTelemetry['pedestrian'] = {
           deviceId,
           type: 'pedestrian',
           timestamp: packet.timestamp,
@@ -72,7 +70,7 @@ export async function POST(request: Request) {
         };
       }
       if (payload.pju) {
-        global.__smartcity_latest_telemetry!['pju'] = {
+        store.latestTelemetry['pju'] = {
           deviceId,
           type: 'pju',
           timestamp: packet.timestamp,
@@ -81,22 +79,26 @@ export async function POST(request: Request) {
       }
     }
 
-    // Normalisasi 'gas' alias ke 'air-quality'
     if (type === 'gas') {
-      global.__smartcity_latest_telemetry!['air-quality'] = packet;
+      store.latestTelemetry['air-quality'] = packet;
     }
 
-    // Simpan riwayat paket (maksimal 100 paket terakhir)
-    global.__smartcity_telemetry_history!.unshift(packet);
-    if (global.__smartcity_telemetry_history!.length > 100) {
-      global.__smartcity_telemetry_history!.pop();
+    store.telemetryHistory.unshift(packet);
+    if (store.telemetryHistory.length > 100) {
+      store.telemetryHistory = store.telemetryHistory.slice(0, 100);
     }
+
+    writeIoTStore(store);
+
+    // Kembalikan juga perintah yang sedang antre untuk deviceId ini dalam satu round-trip
+    const pendingCommands = popPendingCommands(deviceId);
 
     return NextResponse.json({
       success: true,
       message: 'Telemetry data successfully received and ingested into SmartCity Engine',
       receivedAt: packet.timestamp,
       packet,
+      commands: pendingCommands,
     });
   } catch (error: any) {
     return NextResponse.json(
@@ -109,11 +111,18 @@ export async function POST(request: Request) {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const pollDeviceId = searchParams.get('pollCommandsFor');
+  const store = readIoTStore();
+
+  const commands = pollDeviceId ? popPendingCommands(pollDeviceId) : [];
+
   return NextResponse.json({
     success: true,
-    totalPacketsStored: global.__smartcity_telemetry_history?.length || 0,
-    latestBySubsystem: global.__smartcity_latest_telemetry || {},
-    recentHistory: (global.__smartcity_telemetry_history || []).slice(0, 20),
+    totalPacketsStored: store.telemetryHistory.length,
+    latestBySubsystem: store.latestTelemetry,
+    recentHistory: store.telemetryHistory.slice(0, 20),
+    commands,
   });
 }

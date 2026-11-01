@@ -22,6 +22,11 @@ export const Topbar: React.FC = () => {
     isLiveIoTMode,
     toggleLiveIoTMode,
     isHardwareConnected,
+    isWebSerialSupported,
+    isSerialConnected,
+    isConnectingSerial,
+    connectSerial,
+    disconnectSerial,
     theme,
     toggleTheme,
     alerts,
@@ -62,19 +67,55 @@ export const Topbar: React.FC = () => {
             <div
               className="h-7 px-2.5 rounded-md border text-[11px] font-mono font-semibold inline-flex items-center gap-1.5 whitespace-nowrap"
               style={{
-                backgroundColor: isHardwareConnected ? 'var(--sig-green-bg)' : 'var(--bg-well)',
-                borderColor: isHardwareConnected ? 'var(--sig-green-border)' : 'var(--border-line)',
-                color: isHardwareConnected ? 'var(--sig-green)' : 'var(--text-secondary)',
+                backgroundColor:
+                  isHardwareConnected || isSerialConnected ? 'var(--sig-green-bg)' : 'var(--bg-well)',
+                borderColor:
+                  isHardwareConnected || isSerialConnected
+                    ? 'var(--sig-green-border)'
+                    : 'var(--border-line)',
+                color:
+                  isHardwareConnected || isSerialConnected
+                    ? 'var(--sig-green)'
+                    : 'var(--text-secondary)',
               }}
             >
               <span
                 className="w-1.5 h-1.5 rounded-full shrink-0"
                 style={{
-                  backgroundColor: isHardwareConnected ? 'var(--sig-green-dot)' : 'var(--text-secondary)',
+                  backgroundColor:
+                    isHardwareConnected || isSerialConnected
+                      ? 'var(--sig-green-dot)'
+                      : 'var(--text-secondary)',
                 }}
               />
-              <span>{isHardwareConnected ? 'COM3 ONLINE' : 'SIMULASI'}</span>
+              <span>
+                {isSerialConnected
+                  ? 'USB COM3 AKTIF'
+                  : isHardwareConnected
+                  ? 'COM3 ONLINE'
+                  : 'SIMULASI'}
+              </span>
             </div>
+
+            {isWebSerialSupported && (
+              <button
+                type="button"
+                onClick={isSerialConnected ? disconnectSerial : connectSerial}
+                disabled={isConnectingSerial}
+                className={`ctrl-btn ctrl-btn-sm font-mono ${
+                  isSerialConnected ? 'ctrl-btn-red' : 'ctrl-btn-green'
+                }`}
+                title="Hubungkan ESP32 langsung lewat kabel USB (COM3) dari browser"
+              >
+                <span>
+                  {isConnectingSerial
+                    ? 'Membuka...'
+                    : isSerialConnected
+                    ? 'Putus USB'
+                    : 'Hubungkan USB'}
+                </span>
+              </button>
+            )}
           </div>
 
           {/* Center: Unified Segmented Module Track (Desktop) */}

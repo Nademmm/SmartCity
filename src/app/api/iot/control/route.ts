@@ -1,21 +1,7 @@
 import { NextResponse } from 'next/server';
+import { readIoTStore, enqueueCommand, popPendingCommands } from '@/lib/iotStore';
 
-export interface CommandPacket {
-  id: string;
-  targetDeviceId: string;
-  action: string;
-  value?: any;
-  createdAt: string;
-  status: 'PENDING' | 'DISPATCHED' | 'ACKNOWLEDGED';
-}
-
-declare global {
-  var __smartcity_commands_queue: CommandPacket[] | undefined;
-}
-
-if (!global.__smartcity_commands_queue) {
-  global.__smartcity_commands_queue = [];
-}
+export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   try {
@@ -32,19 +18,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const command: CommandPacket = {
-      id: `cmd-${Date.now()}`,
-      targetDeviceId,
-      action,
-      value,
-      createdAt: new Date().toISOString(),
-      status: 'PENDING',
-    };
-
-    global.__smartcity_commands_queue!.unshift(command);
-    if (global.__smartcity_commands_queue!.length > 50) {
-      global.__smartcity_commands_queue!.pop();
-    }
+    const command = enqueueCommand(targetDeviceId, action, value);
 
     return NextResponse.json({
       success: true,
@@ -59,28 +33,20 @@ export async function POST(request: Request) {
   }
 }
 
-// Endpoint agar ESP32 bisa mengambil perintah tertunda (Polling Command)
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const deviceId = searchParams.get('deviceId');
 
   if (!deviceId) {
+    const store = readIoTStore();
     return NextResponse.json({
       success: true,
-      totalQueued: global.__smartcity_commands_queue?.length || 0,
-      allCommands: global.__smartcity_commands_queue || [],
+      totalQueued: store.commandsQueue.length,
+      allCommands: store.commandsQueue,
     });
   }
 
-  // Ambil perintah tertunda untuk deviceId ini
-  const pendingCommands = (global.__smartcity_commands_queue || []).filter(
-    (cmd) => cmd.targetDeviceId === deviceId && cmd.status === 'PENDING'
-  );
-
-  // Tandai sebagai DISPATCHED
-  pendingCommands.forEach((cmd) => {
-    cmd.status = 'DISPATCHED';
-  });
+  const pendingCommands = popPendingCommands(deviceId);
 
   return NextResponse.json({
     success: true,

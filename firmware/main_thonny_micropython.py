@@ -94,6 +94,8 @@ fase_penyeberangan = "HIJAU"
 waktu_fase = time.ticks_ms()
 
 pju_manual_mode = "AUTO"  # "AUTO", "ON", atau "OFF"
+ldr_override_mode = "AUTO"  # "AUTO" atau "MANUAL"
+nilai_ldr_manual = 1200
 gas_override_mode = "AUTO"  # "AUTO" atau "MANUAL"
 nilai_gas_manual = 650
 
@@ -102,12 +104,12 @@ spoll = uselect.poll()
 spoll.register(sys.stdin, uselect.POLLIN)
 
 def cek_perintah_jaringan():
-    global siap_menyeberang, fase_penyeberangan, waktu_fase, pju_manual_mode, gas_override_mode, nilai_gas_manual
-    if spoll.poll(0):
+    global siap_menyeberang, fase_penyeberangan, waktu_fase, pju_manual_mode, ldr_override_mode, nilai_ldr_manual, gas_override_mode, nilai_gas_manual
+    while spoll.poll(0):
         try:
             line = sys.stdin.readline().strip()
             if not line:
-                return
+                break
 
             print(">>> PERINTAH DITERIMA:", line)
 
@@ -125,10 +127,19 @@ def cek_perintah_jaringan():
 
             elif line == "CMD:PJU_AUTO":
                 pju_manual_mode = "AUTO"
+                ldr_override_mode = "AUTO"
                 print(">>> STATUS PJU: OTOMATIS SENSOR LDR")
 
+            elif line.startswith("CMD:LDR_SET:"):
+                try:
+                    nilai_ldr_manual = int(line.split(":")[2])
+                    ldr_override_mode = "MANUAL"
+                    print(">>> STATUS LDR: MANUAL SET KE", nilai_ldr_manual)
+                except Exception as ex:
+                    print("[ERR_LDR_SET]", ex)
+
             elif line in ("CMD:FORCE_CROSSING", "CMD:CROSSING_TRIGGER"):
-                if fase_penyeberangan == "HIJAU":
+                if fase_penyeberangan in ("HIJAU", "TUNGGU_KOSONG"):
                     siap_menyeberang = False
                     fase_penyeberangan = "KUNING"
                     waktu_fase = time.ticks_ms()
@@ -184,6 +195,7 @@ def cek_perintah_jaringan():
                     print("[ERR_GAS_SET]", ex)
         except Exception as err:
             print("[ERR_CMD]", err)
+            break
 
 # Pengaturan pola buzzer
 INTERVAL_GAS = 800
@@ -443,7 +455,10 @@ while True:
     # ----------------------------------------------
     # FITUR 5: SMART PJU (OTOMATIS / KONTROL WEB)
     # ----------------------------------------------
-    nilai_ldr = ldr.read()
+    if ldr_override_mode == "MANUAL":
+        nilai_ldr = nilai_ldr_manual
+    else:
+        nilai_ldr = ldr.read()
 
     print("\nSMART PJU")
     print("Nilai LDR:", nilai_ldr)

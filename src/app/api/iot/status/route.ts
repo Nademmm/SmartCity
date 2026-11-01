@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
+import { readIoTStore } from '@/lib/iotStore';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  const latestTelemetry = global.__smartcity_latest_telemetry || {};
-  const activeDevices = Object.keys(latestTelemetry);
+  const store = readIoTStore();
+  const activeDevices = Object.keys(store.latestTelemetry);
 
   return NextResponse.json({
     status: 'ONLINE',

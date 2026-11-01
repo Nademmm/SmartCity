@@ -17,6 +17,9 @@ const QUICK_COMMANDS = [
   { cmd: 'CMD:BUZZER_TEST', label: 'BUZZER TEST' },
   { cmd: 'CMD:CROSSING_RESET', label: 'RESET HIJAU' },
   { cmd: 'CMD:GAS_AUTO', label: 'GAS AUTO' },
+  { cmd: 'CMD:GAS_BERSIH', label: 'GAS 650' },
+  { cmd: 'CMD:GAS_SEDANG', label: 'GAS 1250' },
+  { cmd: 'CMD:GAS_BAHAYA', label: 'GAS 2100' },
 ];
 
 export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
@@ -24,162 +27,35 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
   title = 'Terminal Serial ESP32 (COM3 · 115200)',
   maxHeight = 'max-h-80',
 }) => {
-  const { gas, crossing, pju, isHardwareConnected, sendCommand } = useSmartCity();
-  const [logs, setLogs] = useState<string[]>([]);
+  const {
+    gas,
+    crossing,
+    pju,
+    isHardwareConnected,
+    isWebSerialSupported,
+    isSerialConnected,
+    isConnectingSerial,
+    serialError,
+    clearSerialError,
+    serialLogs,
+    clearSerialLogs,
+    connectSerial,
+    disconnectSerial,
+    sendCommand,
+  } = useSmartCity();
+
+  const [localLogs, setLocalLogs] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
-  const [isWebSerialSupported, setIsWebSerialSupported] = useState(false);
-  const [isSerialConnected, setIsSerialConnected] = useState(false);
-  const [isConnecting, setIsConnecting] = useState(false);
-  const [serialError, setSerialError] = useState<string | null>(null);
   const [customCommand, setCustomCommand] = useState('');
 
   const consoleContainerRef = useRef<HTMLDivElement>(null);
-  const portRef = useRef<unknown>(null);
-  const writerRef = useRef<unknown>(null);
-  const keepReadingRef = useRef<boolean>(true);
-
-  useEffect(() => {
-    if (typeof window !== 'undefined' && 'serial' in navigator) {
-      setIsWebSerialSupported(true);
-    }
-  }, []);
-
-  const connectSerial = async () => {
-    if (!('serial' in navigator)) {
-      setSerialError('Web Serial API memerlukan Google Chrome atau Microsoft Edge.');
-      return;
-    }
-
-    try {
-      setIsConnecting(true);
-      setSerialError(null);
-      const navSerial = (navigator as unknown as { serial: { requestPort: () => Promise<any> } }).serial;
-      const port = await navSerial.requestPort();
-      await port.open({ baudRate: 115200 });
-      portRef.current = port;
-
-      if (port.writable) {
-        const writer = port.writable.getWriter();
-        writerRef.current = writer;
-        (window as unknown as { __smartcity_send_serial?: (cmd: string) => Promise<void> }).__smartcity_send_serial = async (cmd: string) => {
-          const enc = new TextEncoder();
-          await writer.write(enc.encode(cmd + '\n'));
-        };
-      }
-
-      setIsSerialConnected(true);
-      keepReadingRef.current = true;
-
-      setLogs((prev) => [
-        ...prev,
-        `[${new Date().toLocaleTimeString('id-ID', { hour12: false })}] [USB SERIAL] Terhubung 115200 baud.`,
-      ]);
-
-      const textDecoder = new TextDecoderStream();
-      port.readable.pipeTo(textDecoder.writable).catch(() => {});
-      const reader = textDecoder.readable.getReader();
-
-      let lineBuffer = '';
-      while (keepReadingRef.current) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        if (value) {
-          lineBuffer += value;
-          const lines = lineBuffer.split('\n');
-          lineBuffer = lines.pop() || '';
-
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-
-            setLogs((prev) => [...prev.slice(-140), trimmed]);
-
-            if (trimmed.startsWith('[JSON]')) {
-              try {
-                const parsed = JSON.parse(trimmed.substring(6));
-                const isPjuOn = parsed.pjuStatus === 'MENYALA';
-                fetch('/api/iot/telemetry', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    deviceId: 'ESP32-MINIATURE',
-                    type: 'miniature-all',
-                    payload: {
-                      gas: {
-                        gasValue: parsed.gas,
-                        gasMode: parsed.gasMode || 'AUTO',
-                        statusPolusi: parsed.statusPolusi,
-                      },
-                      crossing: {
-                        jarakKanan: parsed.jarakKanan,
-                        jarakKiri: parsed.jarakKiri,
-                        orangKanan: parsed.orangKanan,
-                        orangKiri: parsed.orangKiri,
-                        lampu: parsed.lampu,
-                        buzzer: parsed.lampu === 'MERAH',
-                        siapMenyeberang: parsed.lampu === 'HIJAU',
-                      },
-                      pju: {
-                        ldrValue: parsed.ldr,
-                        kondisi: parsed.kondisi,
-                        pjuStatus: parsed.pjuStatus,
-                        pjuMode: parsed.pjuMode || 'AUTO',
-                        ledMerah: isPjuOn,
-                        ledPutih: isPjuOn,
-                      },
-                    },
-                  }),
-                }).catch(() => {});
-              } catch {}
-            }
-          }
-        }
-      }
-
-      reader.releaseLock();
-    } catch (err: unknown) {
-      const errorObj = err as { name?: string; message?: string };
-      if (errorObj.name !== 'NotFoundError') {
-        setSerialError(`Gagal membuka port COM3: ${errorObj.message || 'Port sibuk'}`);
-      }
-    } finally {
-      setIsConnecting(false);
-    }
-  };
-
-  const disconnectSerial = async () => {
-    keepReadingRef.current = false;
-    delete (window as unknown as { __smartcity_send_serial?: unknown }).__smartcity_send_serial;
-    const writer = writerRef.current as { close?: () => Promise<void> } | null;
-    if (writer && writer.close) {
-      try {
-        await writer.close();
-      } catch {}
-      writerRef.current = null;
-    }
-    const port = portRef.current as { close?: () => Promise<void> } | null;
-    if (port && port.close) {
-      try {
-        await port.close();
-      } catch {}
-      portRef.current = null;
-    }
-    setIsSerialConnected(false);
-    setLogs((prev) => [
-      ...prev,
-      `[${new Date().toLocaleTimeString('id-ID', { hour12: false })}] [USB SERIAL] Koneksi diputus.`,
-    ]);
-  };
 
   const handleDispatchCommand = async (cmdString: string) => {
     if (!cmdString.trim()) return;
     const formatted = cmdString.trim().startsWith('CMD:') ? cmdString.trim() : `CMD:${cmdString.trim()}`;
     await sendCommand(formatted);
-    setLogs((prev) => [
-      ...prev,
-      `>>> PERINTAH DIKIRIM: ${formatted}`,
-    ]);
+    setLocalLogs((prev) => [...prev.slice(-100), `>>> PERINTAH DIKIRIM: ${formatted}`]);
   };
 
   useEffect(() => {
@@ -191,21 +67,22 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
     const lines: string[] = [];
     if (filterFeature === 'all') {
       lines.push(
-        `[JSON]{"gas":${gas.gasValue},"statusPolusi":"${gas.statusPolusi}","jarakKanan":${jkStr},"jarakKiri":${jkrStr},"orangKanan":${crossing.orangKanan},"orangKiri":${crossing.orangKiri},"lampu":"${crossing.lampu}","ldr":${pju.ldrValue},"kondisi":"${pju.kondisi}","pjuStatus":"${pju.pjuStatus}","pjuMode":"${pju.pjuMode}"}`
+        `[JSON]{"gas":${gas.gasValue},"gasMode":"${gas.gasMode}","statusPolusi":"${gas.statusPolusi}","jarakKanan":${jkStr},"jarakKiri":${jkrStr},"orangKanan":${crossing.orangKanan},"orangKiri":${crossing.orangKiri},"lampu":"${crossing.lampu}","ldr":${pju.ldrValue},"kondisi":"${pju.kondisi}","pjuStatus":"${pju.pjuStatus}","pjuMode":"${pju.pjuMode}"}`
       );
     } else if (filterFeature === 'polusi') {
-      lines.push(`MONITORING POLUSI | Nilai gas: ${gas.gasValue} | Status: ${gas.statusPolusi}`);
+      lines.push(`MONITORING POLUSI | Nilai gas: ${gas.gasValue} (${gas.gasMode}) | Status: ${gas.statusPolusi}`);
     } else if (filterFeature === 'penyeberangan') {
       lines.push(`PENYEBERANGAN | Kanan: ${jkStr} cm | Kiri: ${jkrStr} cm | Fase: ${crossing.lampu}`);
     } else if (filterFeature === 'pju') {
       lines.push(`SMART PJU | LDR: ${pju.ldrValue} | Kondisi: ${pju.kondisi} | Status: ${pju.pjuStatus} (${pju.pjuMode})`);
     }
 
-    setLogs((prev) => [...prev.slice(-100), ...lines]);
+    setLocalLogs((prev) => [...prev.slice(-100), ...lines]);
   }, [
     isHardwareConnected,
     isSerialConnected,
     gas.gasValue,
+    gas.gasMode,
     gas.statusPolusi,
     crossing.jarakKanan,
     crossing.jarakKiri,
@@ -219,16 +96,23 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
     filterFeature,
   ]);
 
+  const displayedLogs = filterFeature === 'all' && serialLogs.length > 0 ? serialLogs : localLogs;
+
   useEffect(() => {
     if (autoScroll && consoleContainerRef.current) {
       consoleContainerRef.current.scrollTop = consoleContainerRef.current.scrollHeight;
     }
-  }, [logs, autoScroll]);
+  }, [displayedLogs, autoScroll]);
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(logs.join('\n'));
+    navigator.clipboard.writeText(displayedLogs.join('\n'));
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  };
+
+  const handleClear = () => {
+    setLocalLogs([]);
+    clearSerialLogs();
   };
 
   return (
@@ -240,12 +124,25 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
           <span
             className="px-2 py-0.5 rounded-md text-[11px] font-mono font-bold border"
             style={{
-              backgroundColor: isHardwareConnected || isSerialConnected ? 'var(--sig-green-bg)' : 'var(--bg-well)',
-              borderColor: isHardwareConnected || isSerialConnected ? 'var(--sig-green-border)' : 'var(--border-line)',
-              color: isHardwareConnected || isSerialConnected ? 'var(--sig-green)' : 'var(--text-secondary)',
+              backgroundColor:
+                isHardwareConnected || isSerialConnected ? 'var(--sig-green-bg)' : 'var(--bg-well)',
+              borderColor:
+                isHardwareConnected || isSerialConnected
+                  ? 'var(--sig-green-border)'
+                  : 'var(--border-line)',
+              color:
+                isHardwareConnected || isSerialConnected
+                  ? 'var(--sig-green)'
+                  : 'var(--text-secondary)',
             }}
           >
-            {isConnecting ? 'MENGHUBUNGKAN...' : isHardwareConnected || isSerialConnected ? 'ONLINE' : 'SIAGA'}
+            {isConnectingSerial
+              ? 'MENGHUBUNGKAN...'
+              : isSerialConnected
+              ? 'USB TERHUBUNG'
+              : isHardwareConnected
+              ? 'BRIDGE ONLINE'
+              : 'SIAGA'}
           </span>
         </div>
 
@@ -254,13 +151,17 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
             <button
               type="button"
               onClick={isSerialConnected ? disconnectSerial : connectSerial}
-              disabled={isConnecting}
+              disabled={isConnectingSerial}
               className={`ctrl-btn ctrl-btn-sm font-mono ${
                 isSerialConnected ? 'ctrl-btn-red' : 'ctrl-btn-green'
               }`}
             >
               <span>
-                {isConnecting ? 'Membuka...' : isSerialConnected ? 'Putuskan USB' : 'Sambungkan USB'}
+                {isConnectingSerial
+                  ? 'Membuka...'
+                  : isSerialConnected
+                  ? 'Putuskan USB'
+                  : 'Sambungkan USB (COM3)'}
               </span>
             </button>
           )}
@@ -283,7 +184,7 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
 
           <button
             type="button"
-            onClick={() => setLogs([])}
+            onClick={handleClear}
             className="ctrl-btn ctrl-btn-sm font-mono"
           >
             <span>Bersihkan</span>
@@ -305,7 +206,7 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
             <span>{serialError}</span>
             <button
               type="button"
-              onClick={() => setSerialError(null)}
+              onClick={clearSerialError}
               className="ctrl-btn ctrl-btn-sm font-mono"
             >
               Tutup
@@ -318,15 +219,17 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
           ref={consoleContainerRef}
           className={`p-3.5 rounded-lg font-mono text-xs leading-relaxed overflow-y-auto select-text ${maxHeight} bg-[#0B0F17] text-[#E2E8F0] border border-[var(--border-strong)] space-y-1`}
         >
-          {isConnecting ? (
+          {isConnectingSerial ? (
             <p className="text-[#FBBF24] py-3">Membuka koneksi serial COM3 (115200 baud)...</p>
-          ) : logs.length === 0 ? (
+          ) : displayedLogs.length === 0 ? (
             <div className="py-4 text-[#94A3B8] space-y-1">
               <p className="font-semibold text-[#F8FAFC]">Belum ada aliran data serial.</p>
-              <p>Klik [Sambungkan USB] atau kirim perintah di bawah untuk menguji respon ESP32.</p>
+              <p>
+                Klik [Sambungkan USB (COM3)] di atas untuk menghubungkan ESP32 langsung ke browser, atau jalankan jembatan serial.
+              </p>
             </div>
           ) : (
-            logs.map((line, idx) => {
+            displayedLogs.map((line, idx) => {
               const isCmd = line.includes('>>>') || line.includes('CMD:');
               const isJson = line.startsWith('[JSON]');
               const isAlert = line.includes('POLUSI TINGGI') || line.includes('MERAH');
@@ -377,7 +280,7 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
         >
           <input
             type="text"
-            placeholder="CMD:PJU_ON | CMD:FORCE_CROSSING | CMD:BUZZER_TEST"
+            placeholder="CMD:PJU_ON | CMD:FORCE_CROSSING | CMD:GAS_SET:1800"
             value={customCommand}
             onChange={(e) => setCustomCommand(e.target.value)}
             aria-label="Perintah Serial Manual"
