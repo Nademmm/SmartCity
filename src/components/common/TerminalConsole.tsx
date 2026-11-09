@@ -141,7 +141,7 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
               : isSerialConnected
               ? 'USB TERHUBUNG'
               : isHardwareConnected
-              ? 'BRIDGE ONLINE'
+              ? 'ONLINE (WI-FI)'
               : 'SIAGA'}
           </span>
         </div>
