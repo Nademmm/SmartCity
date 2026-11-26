@@ -36,14 +36,14 @@ export const Topbar: React.FC = () => {
 
   return (
     <>
-      <header className="sticky top-0 z-30 h-14 bg-[var(--bg-panel)] border-b border-[var(--border-line)]">
-        <div className="max-w-7xl mx-auto h-full px-3 sm:px-6 flex items-center justify-between gap-3">
+      <header className="sticky top-0 z-30 w-full bg-[var(--bg-panel)] border-b border-[var(--border-line)]">
+        <div className="max-w-7xl mx-auto min-h-13 px-2.5 sm:px-6 py-1.5 flex items-center justify-between gap-1.5 sm:gap-3">
           {/* Left: Brand Identity & Hardware Port Status */}
-          <div className="flex items-center gap-2.5 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0">
             <button
               type="button"
               onClick={() => setActiveSubsystem('overview')}
-              className="flex items-center gap-2.5 text-left cursor-pointer bg-transparent border-0 p-0"
+              className="flex items-center gap-1.5 sm:gap-2 text-left cursor-pointer bg-transparent border-0 p-0 shrink-0"
             >
               <span
                 className="w-7 h-7 rounded-md flex items-center justify-center font-mono font-bold text-xs tracking-tighter shrink-0"
@@ -54,18 +54,15 @@ export const Topbar: React.FC = () => {
               >
                 SC
               </span>
-              <div className="flex items-center gap-1.5">
-                <span className="font-semibold text-sm tracking-tight text-[var(--text-primary)] whitespace-nowrap">
-                  SmartCity
-                </span>
-                <span className="rack-tag hidden sm:inline-block">ESP32</span>
-              </div>
+              <span className="font-semibold text-xs sm:text-sm tracking-tight text-[var(--text-primary)] whitespace-nowrap">
+                SmartCity
+              </span>
             </button>
 
-            <span className="hidden sm:block h-4 w-px bg-[var(--border-line)]" />
+            <span className="hidden sm:block h-4 w-px bg-[var(--border-line)] shrink-0" />
 
             <div
-              className="h-7 px-2.5 rounded-md border text-[11px] font-mono font-semibold inline-flex items-center gap-1.5 whitespace-nowrap"
+              className="h-7 px-2 rounded-md border text-[10px] sm:text-[11px] font-mono font-semibold inline-flex items-center gap-1 whitespace-nowrap shrink-0"
               style={{
                 backgroundColor:
                   isHardwareConnected || isSerialConnected ? 'var(--sig-green-bg)' : 'var(--bg-well)',
@@ -90,9 +87,9 @@ export const Topbar: React.FC = () => {
               />
               <span>
                 {isSerialConnected
-                  ? 'USB COM3 AKTIF'
+                  ? 'USB AKTIF'
                   : isHardwareConnected
-                  ? 'COM3 ONLINE'
+                  ? 'ONLINE'
                   : 'SIMULASI'}
               </span>
             </div>
@@ -102,7 +99,7 @@ export const Topbar: React.FC = () => {
                 type="button"
                 onClick={isSerialConnected ? disconnectSerial : connectSerial}
                 disabled={isConnectingSerial}
-                className={`ctrl-btn ctrl-btn-sm font-mono ${
+                className={`hidden sm:inline-flex ctrl-btn ctrl-btn-sm font-mono ${
                   isSerialConnected ? 'ctrl-btn-red' : 'ctrl-btn-green'
                 }`}
                 title="Hubungkan ESP32 langsung lewat kabel USB (COM3) dari browser"
@@ -153,12 +150,12 @@ export const Topbar: React.FC = () => {
             })}
           </nav>
 
-          {/* Right: Proportional Hardware Utility Bar */}
-          <div className="flex items-center gap-1.5 shrink-0">
+          {/* Right: Compact Utility Bar (Fits Mobile & Desktop without Overflow) */}
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
             <button
               type="button"
               onClick={toggleLiveIoTMode}
-              className={`ctrl-btn ctrl-btn-sm font-mono ${
+              className={`ctrl-btn ctrl-btn-sm font-mono !px-2 sm:!px-2.5 ${
                 isLiveIoTMode ? 'ctrl-btn-green' : ''
               }`}
               title={isLiveIoTMode ? 'Sinkronisasi telemetri aktif' : 'Sinkronisasi telemetri dijeda'}
@@ -169,13 +166,13 @@ export const Topbar: React.FC = () => {
                   backgroundColor: isLiveIoTMode ? 'var(--sig-green-dot)' : 'var(--text-secondary)',
                 }}
               />
-              <span>{isLiveIoTMode ? 'SYNC ON' : 'PAUSED'}</span>
+              <span>{isLiveIoTMode ? 'SYNC' : 'PAUSE'}</span>
             </button>
 
             <button
               type="button"
               onClick={toggleAudioMute}
-              className={`ctrl-btn ctrl-btn-sm font-mono ${
+              className={`ctrl-btn ctrl-btn-sm font-mono !px-2 sm:!px-2.5 ${
                 !isAudioMuted ? 'ctrl-btn-active' : ''
               }`}
               aria-label={isAudioMuted ? 'Nyalakan suara alarm' : 'Bisukan suara alarm'}
@@ -186,7 +183,7 @@ export const Topbar: React.FC = () => {
             <button
               type="button"
               onClick={toggleTheme}
-              className="ctrl-btn ctrl-btn-sm font-mono"
+              className="ctrl-btn ctrl-btn-sm font-mono !px-2 sm:!px-2.5"
               aria-label={theme === 'light' ? 'Ganti ke tema gelap' : 'Ganti ke tema terang'}
             >
               <span>{theme === 'light' ? 'GELAP' : 'TERANG'}</span>
@@ -198,7 +195,7 @@ export const Topbar: React.FC = () => {
       {/* Mobile Bottom Dock (Proportional 6-column Segmented Bar) */}
       <nav
         aria-label="Navigasi Modul Mobile"
-        className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-[var(--bg-panel)] border-t border-[var(--border-line)] px-2 py-1.5 grid grid-cols-6 gap-1"
+        className="lg:hidden fixed bottom-0 left-0 right-0 z-30 w-full max-w-[100vw] bg-[var(--bg-panel)] border-t border-[var(--border-line)] px-1.5 py-1.5 grid grid-cols-6 gap-1"
       >
         {NAV_MODULES.map((item) => {
           const isActive = activeSubsystem === item.id;
@@ -207,7 +204,7 @@ export const Topbar: React.FC = () => {
               key={item.id}
               type="button"
               onClick={() => setActiveSubsystem(item.id)}
-              className={`flex flex-col items-center justify-center rounded-md py-1.5 px-1 min-h-[44px] transition-colors cursor-pointer ${
+              className={`flex flex-col items-center justify-center rounded-md py-1.5 px-0.5 min-h-[44px] transition-colors cursor-pointer min-w-0 ${
                 isActive
                   ? 'bg-[var(--accent-bg)] text-[var(--accent-text)] border border-[var(--accent-border)] font-semibold'
                   : 'bg-transparent text-[var(--text-secondary)] border border-transparent'
@@ -216,7 +213,7 @@ export const Topbar: React.FC = () => {
               <span className="font-mono text-[10px] font-bold leading-none mb-1 opacity-80">
                 {item.code}
               </span>
-              <span className="text-[11px] leading-none truncate max-w-full">
+              <span className="text-[10px] sm:text-[11px] leading-none truncate max-w-full">
                 {item.shortLabel}
               </span>
             </button>

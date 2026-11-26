@@ -35,10 +35,10 @@ const DashboardContent: React.FC = () => {
   };
 
   return (
-    <div className="min-h-dvh flex flex-col bg-[var(--bg-canvas)] text-[var(--text-primary)]">
+    <div className="min-h-dvh w-full max-w-[100vw] overflow-x-hidden flex flex-col bg-[var(--bg-canvas)] text-[var(--text-primary)]">
       <PollutionAlarmModal />
       <Topbar />
-      <main className="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-6 pt-4 pb-24 lg:pb-8">
+      <main className="flex-1 w-full max-w-7xl mx-auto px-2.5 sm:px-6 pt-3 sm:pt-4 pb-24 lg:pb-8">
         {renderActiveView()}
       </main>
     </div>

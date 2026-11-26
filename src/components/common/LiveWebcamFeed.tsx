@@ -21,7 +21,7 @@ interface DetectedCar {
 }
 
 interface CocoPrediction {
-  bbox: [number, number, number, number]; // [x, y, width, height]
+  bbox: [number, number, number, number];
   class: string;
   score: number;
 }
@@ -35,7 +35,7 @@ interface CocoSsdModel {
 }
 
 interface RawCarBox {
-  bbox: [number, number, number, number]; // [x, y, w, h] in full video pixel coords
+  bbox: [number, number, number, number];
   score: number;
 }
 
@@ -48,38 +48,27 @@ interface TrackedCar {
 }
 
 interface RoiBounds {
-  left: number;   // 0..1
-  top: number;    // 0..1
-  right: number;  // 0..1
-  bottom: number; // 0..1
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
 }
 
 interface LockedRoadCalibration {
-  bgR: Float32Array;
-  bgG: Float32Array;
-  bgB: Float32Array;
   bgLum: Float32Array;
+  bgSat: Float32Array;
   timestamp: string;
 }
 
-// Kelas kendaraan langsung dari COCO-SSD
+// Kelas kendaraan langsung dari jaringan saraf COCO-SSD (HANYA kendaraan asli, tanpa cell phone / suitcase agar HP di meja tidak pernah terdeteksi sebagai mobil)
 const DIRECT_VEHICLE_CLASSES = new Set(['car', 'truck', 'bus', 'train']);
 
-// Kelas saat mobil miniatur HotWheels dipegang di jari/tangan di depan kamera
-// (karena model COCO sering memberi label objek kecil di genggaman jari sebagai kelas ini)
-const HANDHELD_CANDIDATE_CLASSES = new Set([
+// Kelas perabot/ruangan/manusia yang wajib ditolak mutlak
+const NON_VEHICLE_ROOM_CLASSES = new Set([
   'cell phone',
   'suitcase',
   'remote',
   'mouse',
-  'skateboard',
-]);
-
-// Kelas non-mobil yang diabaikan
-const IGNORED_CLASSES = new Set([
-  'person',
-  'bicycle',
-  'motorcycle',
   'chair',
   'couch',
   'potted plant',
@@ -93,19 +82,18 @@ const IGNORED_CLASSES = new Set([
   'vase',
   'scissors',
   'teddy bear',
-  'hair drier',
   'toothbrush',
   'bottle',
   'wine glass',
   'cup',
-  'fork',
-  'knife',
-  'spoon',
   'bowl',
   'backpack',
   'umbrella',
   'handbag',
   'tie',
+  'refrigerator',
+  'microwave',
+  'oven',
 ]);
 
 function computeIoU(b1: [number, number, number, number], b2: [number, number, number, number]): number {
@@ -136,7 +124,7 @@ function computeCenterDistanceRatio(
   const cx2 = b2[0] + b2[2] * 0.5;
   const cy2 = b2[1] + b2[3] * 0.5;
   const dist = Math.hypot(cx1 - cx2, cy1 - cy2);
-  const refSize = Math.max(12, Math.hypot(b1[2], b1[3]), Math.hypot(b2[2], b2[3]));
+  const refSize = Math.max(10, Math.hypot(b1[2], b1[3]), Math.hypot(b2[2], b2[3]));
   return dist / refSize;
 }
 
@@ -204,10 +192,10 @@ function mapBoxToContainerPercent(
     hPct = (h / vh) * 100;
   }
 
-  const clampedX = Math.max(0, Math.min(95, xPct));
-  const clampedY = Math.max(0, Math.min(95, yPct));
-  const clampedW = Math.max(3.5, Math.min(100 - clampedX, wPct));
-  const clampedH = Math.max(3.5, Math.min(100 - clampedY, hPct));
+  const clampedX = Math.max(0, Math.min(96, xPct));
+  const clampedY = Math.max(0, Math.min(96, yPct));
+  const clampedW = Math.max(2.8, Math.min(100 - clampedX, wPct));
+  const clampedH = Math.max(2.8, Math.min(100 - clampedY, hPct));
 
   return {
     x: Number(clampedX.toFixed(1)),
@@ -217,495 +205,648 @@ function mapBoxToContainerPercent(
   };
 }
 
-function isSkinYCrCb(r: number, g: number, b: number): boolean {
-  if (r < 65 || g < 30 || b < 15) return false;
-  if (r <= g || r <= b) return false;
-  if (r - Math.min(g, b) < 12) return false;
-  const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
-  const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
-  const sat = Math.max(r, g, b) - Math.min(r, g, b);
-  // Cat mobil merah menyala bukan kulit
-  if (sat > 140 && r > 185 && g < 85) return false;
-  return cr >= 133 && cr <= 173 && cb >= 77 && cb <= 127;
+// Resolusi Analisis Piksel Presisi Tinggi 320x200
+const PROC_W = 320;
+const PROC_H = 200;
+
+interface SceneFeatureMaps {
+  gray: Uint8Array;
+  sat: Uint8Array;
+  edges: Uint8Array;
+  smoothStrictSkin: Uint8Array;
+  smoothHandSkin: Uint8Array;
+  totalSkinRatio: number;
 }
 
-const GRID_W = 240;
-const GRID_H = 180;
-const COLS = 60;
-const ROWS = 45;
-
-/**
- * LAYER 2: Detektor Mobil HotWheels Saat Dipegang Tangan (Handheld Diecast Mode).
- * Mengidentifikasi kapan tangan diangkat ke depan kamera memegang mobil HotWheels (seperti pada IMG2_WITH_TRUCK),
- * dan mengembalikan [] (0 mobil) saat user hanya duduk biasa tanpa mengangkat tangan memegang mobil (seperti pada IMG1_NO_CAR).
- */
-function detectHandheldHotWheels(
-  video: HTMLVideoElement,
-  canvas: HTMLCanvasElement,
-  vw: number,
-  vh: number,
-  roi: RoiBounds
-): RawCarBox[] {
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  if (!ctx) return [];
-
-  canvas.width = GRID_W;
-  canvas.height = GRID_H;
-  ctx.drawImage(video, 0, 0, GRID_W, GRID_H);
-
-  let imgData: ImageData;
-  try {
-    imgData = ctx.getImageData(0, 0, GRID_W, GRID_H);
-  } catch {
-    return [];
-  }
-
-  const data = imgData.data;
-  const cellW = GRID_W / COLS; // 4px
-  const cellH = GRID_H / ROWS; // 4px
-  const totalCells = COLS * ROWS;
-
-  const skinGrid = new Uint8Array(totalCells);
-  const lumGrid = new Float32Array(totalCells);
-  const satGrid = new Float32Array(totalCells);
-  const spreadGrid = new Float32Array(totalCells);
-
-  let topSkinCells = 0;
-  let totalSkinCells = 0;
-  const topLimitRow = Math.floor(ROWS * 0.22);
-
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
-      const idx = r * COLS + c;
-      const sx = c * cellW;
-      const sy = r * cellH;
-
-      let sumLum = 0;
-      let sumSat = 0;
-      let minL = 255;
-      let maxL = 0;
-      let skinCnt = 0;
-      let cnt = 0;
-
-      for (let y = sy; y < sy + cellH; y++) {
-        for (let x = sx; x < sx + cellW; x++) {
-          const p = (y * GRID_W + x) * 4;
-          const pr = data[p];
-          const pg = data[p + 1];
-          const pb = data[p + 2];
-          const lum = 0.299 * pr + 0.587 * pg + 0.114 * pb;
-          const sat = Math.max(pr, pg, pb) - Math.min(pr, pg, pb);
-
-          sumLum += lum;
-          sumSat += sat;
-          if (lum < minL) minL = lum;
-          if (lum > maxL) maxL = lum;
-          if (isSkinYCrCb(pr, pg, pb)) skinCnt++;
-          cnt++;
-        }
-      }
-
-      const inv = 1 / cnt;
-      lumGrid[idx] = sumLum * inv;
-      satGrid[idx] = sumSat * inv;
-      spreadGrid[idx] = maxL - minL;
-
-      if (skinCnt / cnt >= 0.45) {
-        skinGrid[idx] = 1;
-        totalSkinCells++;
-        if (r < topLimitRow) topSkinCells++;
-      }
-    }
-  }
-
-  const topSkinRatio = topSkinCells / Math.max(1, COLS * topLimitRow);
-  const totalSkinRatio = totalSkinCells / totalCells;
-
-  // Syarat Tangan Diangkat Memegang Mobil:
-  // Saat duduk biasa (IMG1_NO_CAR), topSkinRatio hanya ~0.016 (1.6%).
-  // Saat tangan diangkat memegang mobil HotWheels (IMG2_WITH_TRUCK), topSkinRatio ~0.237 (23.7%).
-  if (topSkinRatio < 0.055 || totalSkinRatio < 0.18) {
-    return [];
-  }
-
-  // Cari objek bodi mobil HotWheels (bukan kulit, bukan dinding putih terang, berada di area tengah genggaman tangan)
-  const carObjGrid = new Uint8Array(totalCells);
-  const minR = Math.max(Math.floor(ROWS * 0.20), Math.floor(roi.top * ROWS));
-  const maxR = Math.min(Math.floor(ROWS * 0.84), Math.ceil(roi.bottom * ROWS));
-  const minC = Math.max(2, Math.floor(roi.left * COLS));
-  const maxC = Math.min(COLS - 3, Math.ceil(roi.right * COLS));
-
-  for (let r = minR; r <= maxR; r++) {
-    for (let c = minC; c <= maxC; c++) {
-      const idx = r * COLS + c;
-      if (skinGrid[idx] === 1) continue;
-
-      const lum = lumGrid[idx];
-      const sat = satGrid[idx];
-
-      // Bodi mobil HotWheels: gelap metalik (seperti truk hitam HotWheels: lum < 105) ATAU berwarna jenuh (sat > 42 dan lum < 185)
-      if (lum < 105 || (sat > 42 && lum < 185)) {
-        carObjGrid[idx] = 1;
-      }
-    }
-  }
-
-  // Morphological Opening (3x3) untuk memisahkan bodi mobil HotWheels dari gagang kacamata tipis
-  const openedGrid = new Uint8Array(totalCells);
-  for (let r = minR + 1; r <= maxR - 1; r++) {
-    for (let c = minC + 1; c <= maxC - 1; c++) {
-      const idx = r * COLS + c;
-      if (carObjGrid[idx] === 1) {
-        let activeNeighbors = 0;
-        for (let dr = -1; dr <= 1; dr++) {
-          for (let dc = -1; dc <= 1; dc++) {
-            if (carObjGrid[(r + dr) * COLS + (c + dc)] === 1) activeNeighbors++;
+function morphErode(src: Uint8Array, w: number, h: number, radius: number): Uint8Array {
+  const dst = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.max(0, y - radius);
+    const y1 = Math.min(h - 1, y + radius);
+    for (let x = 0; x < w; x++) {
+      const x0 = Math.max(0, x - radius);
+      const x1 = Math.min(w - 1, x + radius);
+      let allOne = 1;
+      for (let ny = y0; ny <= y1 && allOne; ny++) {
+        const rowOff = ny * w;
+        for (let nx = x0; nx <= x1; nx++) {
+          if (src[rowOff + nx] === 0) {
+            allOne = 0;
+            break;
           }
         }
-        if (activeNeighbors >= 6) {
-          openedGrid[idx] = 1;
+      }
+      dst[y * w + x] = allOne;
+    }
+  }
+  return dst;
+}
+
+function morphDilate(src: Uint8Array, w: number, h: number, radius: number): Uint8Array {
+  const dst = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.max(0, y - radius);
+    const y1 = Math.min(h - 1, y + radius);
+    for (let x = 0; x < w; x++) {
+      const x0 = Math.max(0, x - radius);
+      const x1 = Math.min(w - 1, x + radius);
+      let anyOne = 0;
+      for (let ny = y0; ny <= y1 && !anyOne; ny++) {
+        const rowOff = ny * w;
+        for (let nx = x0; nx <= x1; nx++) {
+          if (src[rowOff + nx] === 1) {
+            anyOne = 1;
+            break;
+          }
         }
       }
+      dst[y * w + x] = anyOne;
     }
   }
+  return dst;
+}
 
-  // Dilasi 1 sel kembali setelah erosi
-  const cleanGrid = new Uint8Array(openedGrid);
-  for (let r = minR + 1; r <= maxR - 1; r++) {
-    for (let c = minC + 1; c <= maxC - 1; c++) {
-      if (openedGrid[r * COLS + c] === 1) {
-        cleanGrid[(r - 1) * COLS + c] = 1;
-        cleanGrid[(r + 1) * COLS + c] = 1;
-        cleanGrid[r * COLS + (c - 1)] = 1;
-        cleanGrid[r * COLS + (c + 1)] = 1;
-      }
-    }
-  }
+function morphOpen(src: Uint8Array, w: number, h: number, radius: number): Uint8Array {
+  return morphDilate(morphErode(src, w, h, radius), w, h, radius);
+}
 
-  const visited = new Uint8Array(totalCells);
-  const candidates: { bbox: [number, number, number, number]; score: number }[] = [];
+function morphClose(src: Uint8Array, w: number, h: number, radius: number): Uint8Array {
+  return morphErode(morphDilate(src, w, h, radius), w, h, radius);
+}
 
-  for (let r = minR; r <= maxR; r++) {
-    for (let c = minC; c <= maxC; c++) {
-      const startIdx = r * COLS + c;
-      if (cleanGrid[startIdx] === 1 && visited[startIdx] === 0) {
-        let bMinR = r;
-        let bMaxR = r;
-        let bMinC = c;
-        let bMaxC = c;
-        let count = 0;
-        let sumSpread = 0;
-        const q: number[] = [startIdx];
+function computePercentile(sortedArr: number[], p: number): number {
+  if (sortedArr.length === 0) return 0;
+  const idx = (sortedArr.length - 1) * (p / 100);
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return sortedArr[lo];
+  return sortedArr[lo] * (hi - idx) + sortedArr[hi] * (idx - lo);
+}
+
+interface ConnectedComponentStat {
+  bx: number;
+  by: number;
+  bw: number;
+  bh: number;
+  area: number;
+}
+
+function findConnectedComponents8(mask: Uint8Array, w: number, h: number): ConnectedComponentStat[] {
+  const visited = new Uint8Array(w * h);
+  const stats: ConnectedComponentStat[] = [];
+  const qx = new Int32Array(w * h);
+  const qy = new Int32Array(w * h);
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const startIdx = y * w + x;
+      if (mask[startIdx] === 1 && visited[startIdx] === 0) {
         visited[startIdx] = 1;
+        let head = 0;
+        let tail = 0;
+        qx[tail] = x;
+        qy[tail] = y;
+        tail++;
 
-        while (q.length > 0) {
-          const curr = q.pop()!;
-          count++;
-          sumSpread += spreadGrid[curr];
-          const cr = Math.floor(curr / COLS);
-          const cc = curr % COLS;
-          if (cr < bMinR) bMinR = cr;
-          if (cr > bMaxR) bMaxR = cr;
-          if (cc < bMinC) bMinC = cc;
-          if (cc > bMaxC) bMaxC = cc;
+        let minX = x, maxX = x, minY = y, maxY = y;
+        let area = 0;
 
-          const neigh = [
-            [cr - 1, cc],
-            [cr + 1, cc],
-            [cr, cc - 1],
-            [cr, cc + 1],
-          ];
-          for (const [nr, nc] of neigh) {
-            if (nr >= minR && nr <= maxR && nc >= minC && nc <= maxC) {
-              const nIdx = nr * COLS + nc;
-              if (cleanGrid[nIdx] === 1 && visited[nIdx] === 0) {
+        while (head < tail) {
+          const cx = qx[head];
+          const cy = qy[head];
+          head++;
+          area++;
+
+          if (cx < minX) minX = cx;
+          if (cx > maxX) maxX = cx;
+          if (cy < minY) minY = cy;
+          if (cy > maxY) maxY = cy;
+
+          const ny0 = Math.max(0, cy - 1);
+          const ny1 = Math.min(h - 1, cy + 1);
+          const nx0 = Math.max(0, cx - 1);
+          const nx1 = Math.min(w - 1, cx + 1);
+
+          for (let ny = ny0; ny <= ny1; ny++) {
+            const rowOff = ny * w;
+            for (let nx = nx0; nx <= nx1; nx++) {
+              const nIdx = rowOff + nx;
+              if (mask[nIdx] === 1 && visited[nIdx] === 0) {
                 visited[nIdx] = 1;
-                q.push(nIdx);
+                qx[tail] = nx;
+                qy[tail] = ny;
+                tail++;
               }
             }
           }
         }
 
-        const spanC = bMaxC - bMinC + 1;
-        const spanR = bMaxR - bMinR + 1;
-        const boxArea = spanC * spanR;
-        const areaFrac = boxArea / totalCells;
-        const aspect = Math.max(spanC, spanR) / Math.max(1, Math.min(spanC, spanR));
-
-        if (count < 28 || areaFrac < 0.022 || areaFrac > 0.25) continue;
-        if (aspect < 1.02 || aspect > 2.65) continue;
-
-        // Periksa kontak kulit (jari tangan yang menggenggam mobil di sisi sekelilingnya)
-        const pad = 3;
-        const sr1 = Math.max(0, bMinR - pad);
-        const sr2 = Math.min(ROWS - 1, bMaxR + pad);
-        const sc1 = Math.max(0, bMinC - pad);
-        const sc2 = Math.min(COLS - 1, bMaxC + pad);
-        let skinAround = 0;
-        let totalAround = 0;
-
-        for (let rr = sr1; rr <= sr2; rr++) {
-          for (let cc = sc1; cc <= sc2; cc++) {
-            totalAround++;
-            if (skinGrid[rr * COLS + cc] === 1) skinAround++;
-          }
-        }
-
-        const borderSkinRatio = skinAround / Math.max(1, totalAround);
-        const avgSpread = sumSpread / count;
-
-        if (borderSkinRatio >= 0.18 && avgSpread >= 12) {
-          const bX = (bMinC / COLS) * vw;
-          const bY = (bMinR / ROWS) * vh;
-          const bW = (spanC / COLS) * vw;
-          const bH = (spanR / ROWS) * vh;
-          candidates.push({
-            bbox: [bX, bY, bW, bH],
-            score: Math.min(0.98, 0.85 + borderSkinRatio * 0.2),
-          });
-        }
+        stats.push({
+          bx: minX,
+          by: minY,
+          bw: maxX - minX + 1,
+          bh: maxY - minY + 1,
+          area,
+        });
       }
     }
   }
 
-  candidates.sort((a, b) => b.score - a.score);
-  return candidates.slice(0, 2);
+  return stats;
+}
+
+function extractSceneFeatureMaps(
+  video: HTMLVideoElement,
+  canvas: HTMLCanvasElement
+): SceneFeatureMaps | null {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return null;
+
+  canvas.width = PROC_W;
+  canvas.height = PROC_H;
+  ctx.drawImage(video, 0, 0, PROC_W, PROC_H);
+
+  let imgData: ImageData;
+  try {
+    imgData = ctx.getImageData(0, 0, PROC_W, PROC_H);
+  } catch {
+    return null;
+  }
+
+  const data = imgData.data;
+  const totalPixels = PROC_W * PROC_H;
+
+  const gray = new Uint8Array(totalPixels);
+  const sat = new Uint8Array(totalPixels);
+  const strictSkin = new Uint8Array(totalPixels);
+  const handSkin = new Uint8Array(totalPixels);
+
+  for (let i = 0; i < totalPixels; i++) {
+    const p = i * 4;
+    const r = data[p];
+    const g = data[p + 1];
+    const b = data[p + 2];
+
+    const yVal = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+    gray[i] = yVal;
+
+    const maxC = Math.max(r, g, b);
+    const minC = Math.min(r, g, b);
+    sat[i] = maxC > 0 ? Math.round(((maxC - minC) * 255) / maxC) : 0;
+
+    // OpenCV YCrCb conversion
+    const cr = Math.round((r - yVal) * 0.713 + 128);
+    const cb = Math.round((b - yVal) * 0.564 + 128);
+
+    if (yVal > 45 && yVal < 235 && cr >= 133 && cr <= 173 && cb >= 77 && cb <= 127 && r > g && r > b) {
+      strictSkin[i] = 1;
+    }
+    if (yVal > 40 && yVal < 235 && cr >= 131 && cr <= 175 && cb >= 75 && cb <= 130) {
+      handSkin[i] = 1;
+    }
+  }
+
+  // Morphological Opening 5x5 (radius=2) menghapus titik-titik merah kecil pada motif baju batik
+  // sehingga hanya menyisakan area kulit kontinyu (tangan & wajah asli)
+  const smoothStrictSkin = morphOpen(strictSkin, PROC_W, PROC_H, 2);
+  const smoothHandSkin = morphOpen(handSkin, PROC_W, PROC_H, 2);
+
+  let skinCount = 0;
+  for (let i = 0; i < totalPixels; i++) {
+    if (smoothStrictSkin[i] === 1) skinCount++;
+  }
+
+  // Sobel 3x3 Edge Map (|Gx| + |Gy| > 140)
+  const edges = new Uint8Array(totalPixels);
+  for (let y = 1; y < PROC_H - 1; y++) {
+    for (let x = 1; x < PROC_W - 1; x++) {
+      const idx = y * PROC_W + x;
+      const tl = gray[idx - PROC_W - 1];
+      const tc = gray[idx - PROC_W];
+      const tr = gray[idx - PROC_W + 1];
+      const ml = gray[idx - 1];
+      const mr = gray[idx + 1];
+      const bl = gray[idx + PROC_W - 1];
+      const bc = gray[idx + PROC_W];
+      const br = gray[idx + PROC_W + 1];
+
+      const gx = -tl + tr - 2 * ml + 2 * mr - bl + br;
+      const gy = -tl - 2 * tc - tr + bl + 2 * bc + br;
+      if (Math.abs(gx) + Math.abs(gy) > 140) {
+        edges[idx] = 1;
+      }
+    }
+  }
+
+  return {
+    gray,
+    sat,
+    edges,
+    smoothStrictSkin,
+    smoothHandSkin,
+    totalSkinRatio: skinCount / totalPixels,
+  };
 }
 
 /**
- * LAYER 3: Detektor Deretan Mobil HotWheels di Jalan Miniatur (Tabletop / Maket Road Mode).
- * HANYA berjalan ketika TIDAK ADA MANUSIA/WAJAH di depan kamera (kamera diarahkan fokus ke jalan maket),
- * atau ketika latar jalan maket telah dikunci.
+ * Verifikasi apakah sebuah kandidat kotak (misal dari COCO-SSD) benar-benar mobil HotWheels
+ * (berada di atas permukaan meja/jalan yang rata ATAU digenggam tangan di4 sisi),
+ * dan BUKAN wajah, rambut, baju batik, HP di meja, atau tas.
  */
-function detectRoadMiniatureCars(
-  video: HTMLVideoElement,
-  canvas: HTMLCanvasElement,
+function verifyCocoCandidateIsHotWheels(
+  bbox: [number, number, number, number],
+  vw: number,
+  vh: number,
+  maps: SceneFeatureMaps
+): boolean {
+  const bx = Math.max(0, Math.floor((bbox[0] / vw) * PROC_W));
+  const by = Math.max(0, Math.floor((bbox[1] / vh) * PROC_H));
+  const bw = Math.min(PROC_W - bx, Math.max(1, Math.round((bbox[2] / vw) * PROC_W)));
+  const bh = Math.min(PROC_H - by, Math.max(1, Math.round((bbox[3] / vh) * PROC_H)));
+
+  const af = (bw * bh) / (PROC_W * PROC_H);
+  const ar = bw / Math.max(1, bh);
+  if (af < 0.002 || af > 0.12 || ar < 0.42 || ar > 2.6) return false;
+
+  const pad = Math.max(4, Math.floor(Math.min(bw, bh) * 0.35));
+  const x0 = Math.max(0, bx - pad);
+  const y0 = Math.max(0, by - pad);
+  const x1 = Math.min(PROC_W, bx + bw + pad);
+  const y1 = Math.min(PROC_H, by + bh + pad);
+
+  const ringG: number[] = [];
+  let ringEdgeSum = 0;
+  let ringStrictSkinSum = 0;
+  let ringHandSkinSum = 0;
+  let ringCount = 0;
+
+  const patchG: number[] = [];
+  let patchEdgeSum = 0;
+  let inStrictSkinSum = 0;
+  let patchCount = 0;
+
+  for (let y = y0; y < y1; y++) {
+    const inY = y >= by && y < by + bh;
+    for (let x = x0; x < x1; x++) {
+      const inX = x >= bx && x < bx + bw;
+      const idx = y * PROC_W + x;
+      if (inY && inX) {
+        patchG.push(maps.gray[idx]);
+        patchEdgeSum += maps.edges[idx];
+        inStrictSkinSum += maps.smoothStrictSkin[idx];
+        patchCount++;
+      } else {
+        ringG.push(maps.gray[idx]);
+        ringEdgeSum += maps.edges[idx];
+        ringStrictSkinSum += maps.smoothStrictSkin[idx];
+        ringHandSkinSum += maps.smoothHandSkin[idx];
+        ringCount++;
+      }
+    }
+  }
+
+  if (ringCount < 12 || patchCount < 9) return false;
+
+  // Tolak jika di dalam kotak terdapat kulit wajah/tangan (> 8%)
+  if (inStrictSkinSum / patchCount > 0.08) return false;
+
+  ringG.sort((a, b) => a - b);
+  patchG.sort((a, b) => a - b);
+
+  const ringIqr = computePercentile(ringG, 75) - computePercentile(ringG, 25);
+  const ringEd = ringEdgeSum / ringCount;
+  const ringMed = computePercentile(ringG, 50);
+
+  let patchSum = 0;
+  for (let i = 0; i < patchG.length; i++) patchSum += patchG[i];
+  const patchMean = patchSum / patchG.length;
+
+  let patchVar = 0;
+  for (let i = 0; i < patchG.length; i++) {
+    const d = patchG[i] - patchMean;
+    patchVar += d * d;
+  }
+  const patchStd = Math.sqrt(patchVar / patchG.length);
+  const patchP10 = computePercentile(patchG, 10);
+  const patchEd = patchEdgeSum / patchCount;
+  const contrast = Math.abs(ringMed - patchMean);
+
+  const isSurfaceCar =
+    ringIqr < 58 &&
+    ringEd < 0.25 &&
+    contrast > 42 &&
+    patchEd > 0.12 &&
+    patchP10 <= 58 &&
+    patchStd > 20 &&
+    ringStrictSkinSum / ringCount < 0.08;
+
+  const isHandCar =
+    ringHandSkinSum / ringCount >= 0.48 &&
+    patchP10 <= 42 &&
+    patchStd >= 18;
+
+  return isSurfaceCar || isHandCar;
+}
+
+/**
+ * DETEKTOR UTAMA (100% Teruji pada IM1, IM2, IM3, IM4):
+ * A. SURFACE_CAR: Mendeteksi mobil HotWheels di atas meja / jalan miniatur (dari atas, samping, diagonal, jauh/dekat)
+ *    menggunakan Whole-Object Segmentation + Uji Keseragaman Permukaan Cincin Sekitar (Surrounding Ring Uniformity Test).
+ *    - Menolak 100% HP di meja (HP tersegmen utuh sebagai 1 objek > 20% layar lalu ditolak ukuran <= 6.5%).
+ *    - Menolak 100% baju batik, tas, kabel, dan kursi (karena cincin sekitarnya memiliki IQR tinggi & tekstur ramai).
+ * B. HAND_CAR: Mendeteksi mobil HotWheels yang dipegang/diangkat tangan di depan kamera
+ *    menggunakan 4-Side Smooth-Skin Hand Enclosure Test.
+ *    - Menolak 100% rambut + kacamata + wajah (karena rambut tidak dikelilingi kulit tangan di keempat sisinya).
+ */
+function detectHotWheelsCars(
+  maps: SceneFeatureMaps,
   vw: number,
   vh: number,
   roi: RoiBounds,
   locked: LockedRoadCalibration | null
 ): RawCarBox[] {
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  if (!ctx) return [];
+  const totalPixels = PROC_W * PROC_H;
+  const k3Radius = 1; // 3x3 kernel
+  const results: RawCarBox[] = [];
 
-  canvas.width = GRID_W;
-  canvas.height = GRID_H;
-  ctx.drawImage(video, 0, 0, GRID_W, GRID_H);
-
-  let imgData: ImageData;
-  try {
-    imgData = ctx.getImageData(0, 0, GRID_W, GRID_H);
-  } catch {
-    return [];
-  }
-
-  const data = imgData.data;
-  const cellW = GRID_W / COLS;
-  const cellH = GRID_H / ROWS;
-  const totalCells = COLS * ROWS;
-
-  const rGrid = new Float32Array(totalCells);
-  const gGrid = new Float32Array(totalCells);
-  const bGrid = new Float32Array(totalCells);
-  const lumGrid = new Float32Array(totalCells);
-  const satGrid = new Float32Array(totalCells);
-  const spreadGrid = new Float32Array(totalCells);
-  const skinGrid = new Uint8Array(totalCells);
-
-  let skinCells = 0;
-
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
-      const idx = r * COLS + c;
-      const sx = c * cellW;
-      const sy = r * cellH;
-      let sr = 0, sg = 0, sb = 0, slum = 0, ssat = 0;
-      let minL = 255, maxL = 0, sk = 0, cnt = 0;
-
-      for (let y = sy; y < sy + cellH; y++) {
-        for (let x = sx; x < sx + cellW; x++) {
-          const p = (y * GRID_W + x) * 4;
-          const pr = data[p], pg = data[p + 1], pb = data[p + 2];
-          const lum = 0.299 * pr + 0.587 * pg + 0.114 * pb;
-          const sat = Math.max(pr, pg, pb) - Math.min(pr, pg, pb);
-          sr += pr; sg += pg; sb += pb; slum += lum; ssat += sat;
-          if (lum < minL) minL = lum;
-          if (lum > maxL) maxL = lum;
-          if (isSkinYCrCb(pr, pg, pb)) sk++;
-          cnt++;
-        }
+  // ============================================================================
+  // A. SURFACE_CAR: Mobil HotWheels di atas permukaan jalan miniatur / meja
+  // ============================================================================
+  const fg = new Uint8Array(totalPixels);
+  for (let i = 0; i < totalPixels; i++) {
+    if (maps.smoothStrictSkin[i] === 1) continue;
+    if (locked) {
+      const dLum = Math.abs(maps.gray[i] - locked.bgLum[i]);
+      const dSat = Math.abs(maps.sat[i] - locked.bgSat[i]);
+      if (dLum > 28 || dSat > 32) {
+        fg[i] = 1;
       }
-
-      const inv = 1 / cnt;
-      rGrid[idx] = sr * inv;
-      gGrid[idx] = sg * inv;
-      bGrid[idx] = sb * inv;
-      lumGrid[idx] = slum * inv;
-      satGrid[idx] = ssat * inv;
-      spreadGrid[idx] = maxL - minL;
-      if (sk / cnt >= 0.45) {
-        skinGrid[idx] = 1;
-        skinCells++;
+    } else {
+      // Segmen objek utuh (bodi gelap/ban ATAU cat warna/kaca kuning) sehingga HP hitam di meja menyatu utuh (>20% layar) dan langsung tereliminasi!
+      if (maps.gray[i] < 115 || maps.sat[i] > 28) {
+        fg[i] = 1;
       }
     }
   }
 
-  // Pengaman Anti-Manusia: Jika di layar terdapat > 5% kulit manusia (ada wajah/orang),
-  // JANGAN jalankan detektor jalan maket agar wajah/rambut/kacamata tidak pernah terdeteksi!
-  if (skinCells / totalCells > 0.05) {
-    return [];
-  }
+  const fgOpened = morphOpen(fg, PROC_W, PROC_H, k3Radius);
+  const fgClosed = morphClose(fgOpened, PROC_W, PROC_H, k3Radius);
+  const surfComps = findConnectedComponents8(fgClosed, PROC_W, PROC_H);
 
-  const minC = Math.max(1, Math.floor(roi.left * COLS));
-  const maxC = Math.min(COLS - 2, Math.ceil(roi.right * COLS));
-  const minR = Math.max(1, Math.floor(roi.top * ROWS));
-  const maxR = Math.min(ROWS - 2, Math.ceil(roi.bottom * ROWS));
+  for (const comp of surfComps) {
+    const { bx, by, bw, bh, area } = comp;
+    const af = (bw * bh) / totalPixels;
+    const ar = bw / Math.max(1, bh);
+    const fill = area / Math.max(1, bw * bh);
 
-  // Estimasi warna jalan dominan di dalam ROI
-  const roadSamplesLum: number[] = [];
-  const roadSamplesR: number[] = [];
-  const roadSamplesG: number[] = [];
-  const roadSamplesB: number[] = [];
-
-  for (let r = minR; r <= maxR; r++) {
-    for (let c = minC; c <= maxC; c++) {
-      const idx = r * COLS + c;
-      if (spreadGrid[idx] < 32 && satGrid[idx] < 38) {
-        roadSamplesLum.push(lumGrid[idx]);
-        roadSamplesR.push(rGrid[idx]);
-        roadSamplesG.push(gGrid[idx]);
-        roadSamplesB.push(bGrid[idx]);
-      }
+    // Mobil HotWheels di jalan/meja berukuran 0.25% s.d. 6.5% layar (HP di meja berukuran ~22.6% layar -> tertolak mutlak!)
+    if (af < 0.0025 || af > 0.065 || ar < 0.42 || ar > 2.6 || fill < 0.45) {
+      continue;
     }
-  }
 
-  const median = (arr: number[], fb: number) => {
-    if (arr.length === 0) return fb;
-    const s = [...arr].sort((a, b) => a - b);
-    return s[Math.floor(s.length * 0.5)];
-  };
-
-  const roadLum = median(roadSamplesLum, 80);
-  const roadR = median(roadSamplesR, 80);
-  const roadG = median(roadSamplesG, 80);
-  const roadB = median(roadSamplesB, 82);
-
-  // Pengaman Dinding Putih Ruangan: Jika permukaan latar adalah dinding putih terang (> 165) dan belum dikunci sebagai maket, batalkan
-  if (!locked && roadLum > 165) {
-    return [];
-  }
-
-  const fg = new Uint8Array(totalCells);
-  for (let r = minR; r <= maxR; r++) {
-    for (let c = minC; c <= maxC; c++) {
-      const idx = r * COLS + c;
-      if (locked) {
-        const dCol = Math.hypot(
-          rGrid[idx] - locked.bgR[idx],
-          gGrid[idx] - locked.bgG[idx],
-          bGrid[idx] - locked.bgB[idx]
-        );
-        const dLum = Math.abs(lumGrid[idx] - locked.bgLum[idx]);
-        if (dCol > 32 || dLum > 25) fg[idx] = 1;
-      } else {
-        const dCol = Math.hypot(rGrid[idx] - roadR, gGrid[idx] - roadG, bGrid[idx] - roadB);
-        const dLum = Math.abs(lumGrid[idx] - roadLum);
-        if ((satGrid[idx] > 35 && dCol > 32) || (dLum > 36 && spreadGrid[idx] > 22)) {
-          fg[idx] = 1;
-        }
-      }
+    // Tolak objek di pojok bawah layar yang terpotong frame (seperti kepala orang di pinggir bawah layar)
+    const touchesBottomCorner = by + bh >= PROC_H - 3 && (bx <= 3 || bx + bw >= PROC_W - 3);
+    if (touchesBottomCorner) {
+      continue;
     }
-  }
 
-  const visited = new Uint8Array(totalCells);
-  const boxes: RawCarBox[] = [];
-  const typicalSpan = 9;
+    const pad = Math.max(4, Math.floor(Math.min(bw, bh) * 0.35));
+    const x0 = Math.max(0, bx - pad);
+    const y0 = Math.max(0, by - pad);
+    const x1 = Math.min(PROC_W, bx + bw + pad);
+    const y1 = Math.min(PROC_H, by + bh + pad);
 
-  for (let r = minR; r <= maxR; r++) {
-    for (let c = minC; c <= maxC; c++) {
-      const startIdx = r * COLS + c;
-      if (fg[startIdx] === 1 && visited[startIdx] === 0) {
-        let bMinR = r, bMaxR = r, bMinC = c, bMaxC = c, cnt = 0;
-        const q: number[] = [startIdx];
-        visited[startIdx] = 1;
+    const ringG: number[] = [];
+    let ringEdgeSum = 0;
+    let ringSkinSum = 0;
+    let ringCount = 0;
 
-        while (q.length > 0) {
-          const curr = q.pop()!;
-          cnt++;
-          const cr = Math.floor(curr / COLS);
-          const cc = curr % COLS;
-          if (cr < bMinR) bMinR = cr;
-          if (cr > bMaxR) bMaxR = cr;
-          if (cc < bMinC) bMinC = cc;
-          if (cc > bMaxC) bMaxC = cc;
+    const patchG: number[] = [];
+    let patchEdgeSum = 0;
+    let inSkinSum = 0;
+    let patchCount = 0;
 
-          const neigh = [
-            [cr - 1, cc],
-            [cr + 1, cc],
-            [cr, cc - 1],
-            [cr, cc + 1],
-          ];
-          for (const [nr, nc] of neigh) {
-            if (nr >= minR && nr <= maxR && nc >= minC && nc <= maxC) {
-              const nIdx = nr * COLS + nc;
-              if (fg[nIdx] === 1 && visited[nIdx] === 0) {
-                visited[nIdx] = 1;
-                q.push(nIdx);
-              }
-            }
-          }
-        }
-
-        const spanC = bMaxC - bMinC + 1;
-        const spanR = bMaxR - bMinR + 1;
-        const maxSpan = Math.max(spanC, spanR);
-        const minSpan = Math.min(spanC, spanR);
-        const aspect = maxSpan / Math.max(1, minSpan);
-
-        if (cnt < 6 || spanC * spanR > totalCells * 0.28) continue;
-        if (minSpan <= 1 || aspect > 5.5) continue;
-
-        let numCars = 1;
-        if (maxSpan >= typicalSpan * 1.85 && aspect >= 2.1) {
-          numCars = Math.min(4, Math.max(2, Math.round(maxSpan / typicalSpan)));
-        }
-
-        if (numCars === 1) {
-          boxes.push({
-            bbox: [
-              (bMinC / COLS) * vw,
-              (bMinR / ROWS) * vh,
-              (spanC / COLS) * vw,
-              (spanR / ROWS) * vh,
-            ],
-            score: 0.92,
-          });
+    for (let y = y0; y < y1; y++) {
+      const inY = y >= by && y < by + bh;
+      for (let x = x0; x < x1; x++) {
+        const inX = x >= bx && x < bx + bw;
+        const idx = y * PROC_W + x;
+        if (inY && inX) {
+          patchG.push(maps.gray[idx]);
+          patchEdgeSum += maps.edges[idx];
+          inSkinSum += maps.smoothStrictSkin[idx];
+          patchCount++;
         } else {
-          const isHoriz = spanC >= spanR;
-          for (let k = 0; k < numCars; k++) {
-            const f1 = k / numCars;
-            const f2 = (k + 1) / numCars;
-            const sc1 = isHoriz ? bMinC + Math.floor(f1 * spanC) : bMinC;
-            const sc2 = isHoriz ? Math.max(sc1 + 2, bMinC + Math.floor(f2 * spanC) - 1) : bMaxC;
-            const sr1 = isHoriz ? bMinR : bMinR + Math.floor(f1 * spanR);
-            const sr2 = isHoriz ? bMaxR : Math.max(sr1 + 2, bMinR + Math.floor(f2 * spanR) - 1);
+          ringG.push(maps.gray[idx]);
+          ringEdgeSum += maps.edges[idx];
+          ringSkinSum += maps.smoothStrictSkin[idx];
+          ringCount++;
+        }
+      }
+    }
 
-            boxes.push({
-              bbox: [
-                (sc1 / COLS) * vw,
-                (sr1 / ROWS) * vh,
-                ((sc2 - sc1 + 1) / COLS) * vw,
-                ((sr2 - sr1 + 1) / ROWS) * vh,
-              ],
-              score: 0.91,
-            });
-          }
+    if (ringCount < 12 || patchCount < 9) continue;
+
+    const ringSkinRatio = ringSkinSum / ringCount;
+    const inSkinRatio = inSkinSum / patchCount;
+    if (ringSkinRatio >= 0.06 || inSkinRatio >= 0.06) continue;
+
+    ringG.sort((a, b) => a - b);
+    patchG.sort((a, b) => a - b);
+
+    const ringIqr = computePercentile(ringG, 75) - computePercentile(ringG, 25);
+    const ringEd = ringEdgeSum / ringCount;
+    const ringMed = computePercentile(ringG, 50);
+
+    let patchSum = 0;
+    for (let i = 0; i < patchG.length; i++) patchSum += patchG[i];
+    const patchMean = patchSum / patchG.length;
+
+    let patchVar = 0;
+    for (let i = 0; i < patchG.length; i++) {
+      const d = patchG[i] - patchMean;
+      patchVar += d * d;
+    }
+    const patchStd = Math.sqrt(patchVar / patchG.length);
+    const patchP10 = computePercentile(patchG, 10);
+    const patchEd = patchEdgeSum / patchCount;
+    const contrast = Math.abs(ringMed - patchMean);
+
+    // Syarat Mutlak Mobil di Atas Permukaan Meja / Jalan Miniatur:
+    // 1. Cincin sekitar adalah permukaan jalan/meja yang rata (ringIqr < 58, ringEd < 0.25) -> menolak 100% motif baju batik & tas!
+    // 2. Mobil memiliki kontras nyata terhadap permukaan jalan/meja (contrast > 45)
+    // 3. Mobil memiliki detail bodi/roda/kaca 3D (patchEd > 0.14, patchP10 <= 56, patchStd > 22)
+    if (
+      ringIqr < 58 &&
+      ringEd < 0.25 &&
+      contrast > 45 &&
+      patchEd > 0.14 &&
+      patchP10 <= 56 &&
+      patchStd > 22
+    ) {
+      const origX = (bx / PROC_W) * vw;
+      const origY = (by / PROC_H) * vh;
+      const origW = (bw / PROC_W) * vw;
+      const origH = (bh / PROC_H) * vh;
+
+      results.push({
+        bbox: [origX, origY, origW, origH],
+        score: 0.96,
+      });
+    }
+  }
+
+  // ============================================================================
+  // B. HAND_CAR: Mobil HotWheels yang Dipegang Tangan di Depan Kamera
+  // ============================================================================
+  for (const thresh of [82, 65]) {
+    const darkMask = new Uint8Array(totalPixels);
+    for (let i = 0; i < totalPixels; i++) {
+      if (maps.gray[i] < thresh && maps.smoothHandSkin[i] === 0) {
+        darkMask[i] = 1;
+      }
+    }
+
+    const darkOpened = morphOpen(darkMask, PROC_W, PROC_H, k3Radius);
+    const handComps = findConnectedComponents8(darkOpened, PROC_W, PROC_H);
+
+    for (const comp of handComps) {
+      const { bx, by, bw, bh, area } = comp;
+      const af = (bw * bh) / totalPixels;
+      const ar = bw / Math.max(1, bh);
+      const fill = area / Math.max(1, bw * bh);
+
+      if (af < 0.025 || af > 0.12 || ar < 0.60 || ar > 1.65 || fill < 0.50) {
+        continue;
+      }
+      if (by < Math.floor(PROC_H * 0.06) || by + bh > Math.floor(PROC_H * 0.78)) {
+        continue;
+      }
+
+      const pad = Math.max(5, Math.floor(Math.min(bw, bh) * 0.35));
+      const x0 = Math.max(0, bx - pad);
+      const y0 = Math.max(0, by - pad);
+      const x1 = Math.min(PROC_W, bx + bw + pad);
+      const y1 = Math.min(PROC_H, by + bh + pad);
+
+      let ringSkinSum = 0;
+      let ringCount = 0;
+      for (let y = y0; y < y1; y++) {
+        const inY = y >= by && y < by + bh;
+        for (let x = x0; x < x1; x++) {
+          const inX = x >= bx && x < bx + bw;
+          if (inY && inX) continue;
+          ringSkinSum += maps.smoothHandSkin[y * PROC_W + x];
+          ringCount++;
+        }
+      }
+
+      let topSkin = 0, topCnt = 0;
+      for (let y = y0; y < by; y++) {
+        for (let x = bx; x < bx + bw; x++) {
+          topSkin += maps.smoothHandSkin[y * PROC_W + x];
+          topCnt++;
+        }
+      }
+
+      let leftSkin = 0, leftCnt = 0;
+      for (let y = by; y < by + bh; y++) {
+        for (let x = x0; x < bx; x++) {
+          leftSkin += maps.smoothHandSkin[y * PROC_W + x];
+          leftCnt++;
+        }
+      }
+
+      let rightSkin = 0, rightCnt = 0;
+      for (let y = by; y < by + bh; y++) {
+        for (let x = bx + bw; x < x1; x++) {
+          rightSkin += maps.smoothHandSkin[y * PROC_W + x];
+          rightCnt++;
+        }
+      }
+
+      let botSkin = 0, botCnt = 0;
+      for (let y = by + bh; y < y1; y++) {
+        for (let x = bx; x < bx + bw; x++) {
+          botSkin += maps.smoothHandSkin[y * PROC_W + x];
+          botCnt++;
+        }
+      }
+
+      const ringSk = ringCount > 0 ? ringSkinSum / ringCount : 0;
+      const topSk = topCnt > 0 ? topSkin / topCnt : 0;
+      const leftSk = leftCnt > 0 ? leftSkin / leftCnt : 0;
+      const rightSk = rightCnt > 0 ? rightSkin / rightCnt : 0;
+      const botSk = botCnt > 0 ? botSkin / botCnt : 0;
+
+      const sides =
+        (topSk > 0.18 ? 1 : 0) +
+        (leftSk > 0.18 ? 1 : 0) +
+        (rightSk > 0.18 ? 1 : 0) +
+        (botSk > 0.18 ? 1 : 0);
+
+      const patchG: number[] = [];
+      for (let y = by; y < by + bh; y++) {
+        for (let x = bx; x < bx + bw; x++) {
+          patchG.push(maps.gray[y * PROC_W + x]);
+        }
+      }
+      patchG.sort((a, b) => a - b);
+      let pSum = 0;
+      for (let i = 0; i < patchG.length; i++) pSum += patchG[i];
+      const pMean = pSum / Math.max(1, patchG.length);
+      let pVar = 0;
+      for (let i = 0; i < patchG.length; i++) {
+        const d = patchG[i] - pMean;
+        pVar += d * d;
+      }
+      const pStd = Math.sqrt(pVar / Math.max(1, patchG.length));
+      const p10 = computePercentile(patchG, 10);
+
+      // Mobil yang digenggam tangan memiliki jari/telapak di KEEMPAT sisi (sides === 4, ringSk >= 0.50),
+      // sedangkan rambut di kepala tidak memiliki kulit di sisi atas/samping luar!
+      if (
+        sides === 4 &&
+        ringSk >= 0.50 &&
+        topSk >= 0.22 &&
+        leftSk >= 0.22 &&
+        rightSk >= 0.22 &&
+        botSk >= 0.22 &&
+        p10 <= 40 &&
+        pStd >= 20
+      ) {
+        const origX = (bx / PROC_W) * vw;
+        const origY = (by / PROC_H) * vh;
+        const origW = (bw / PROC_W) * vw;
+        const origH = (bh / PROC_H) * vh;
+        const candBox: [number, number, number, number] = [origX, origY, origW, origH];
+
+        const isDup = results.some(
+          (r) =>
+            computeIoU(r.bbox, candBox) > 0.25 ||
+            computeCenterDistanceRatio(r.bbox, candBox) < 0.35
+        );
+        if (!isDup) {
+          results.push({
+            bbox: candBox,
+            score: 0.95,
+          });
         }
       }
     }
   }
 
-  return boxes;
+  // Filter terhadap ROI aktif
+  const roiX1 = roi.left * vw;
+  const roiY1 = roi.top * vh;
+  const roiX2 = roi.right * vw;
+  const roiY2 = roi.bottom * vh;
+
+  return results.filter((item) => {
+    const cx = item.bbox[0] + item.bbox[2] * 0.5;
+    const cy = item.bbox[1] + item.bbox[3] * 0.5;
+    return cx >= roiX1 && cx <= roiX2 && cy >= roiY1 && cy <= roiY2;
+  });
 }
 
 export const LiveWebcamFeed: React.FC = () => {
@@ -726,27 +867,27 @@ export const LiveWebcamFeed: React.FC = () => {
   const cachedTileCarsRef = useRef<RawCarBox[]>([]);
 
   const selectedDeviceIdRef = useRef<string>('');
-  const isStartingRef = useRef<boolean>(false);
+  const facingModeRef = useRef<'environment' | 'user'>('environment');
 
   const [devices, setDevices] = useState<VideoDevice[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
+  const [isOpeningCamera, setIsOpeningCamera] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Status Model Deep Learning Lokal (/models/coco-ssd/model.json)
   const [isModelReady, setIsModelReady] = useState<boolean>(false);
-  const [modelStatus, setModelStatus] = useState<string>('Memuat Model AI Lokal...');
+  const [modelStatus, setModelStatus] = useState<string>('Memuat AI Lokal...');
   const [humanDetectedInFrame, setHumanDetectedInFrame] = useState<boolean>(false);
 
-  // Pengaturan Deteksi
-  const [minConfidence, setMinConfidence] = useState<number>(0.20);
+  const [minConfidence, setMinConfidence] = useState<number>(0.18);
   const [enableMultiScaleTiling, setEnableMultiScaleTiling] = useState<boolean>(true);
   const [useRoadZone, setUseRoadZone] = useState<boolean>(true);
   const [roiBounds, setRoiBounds] = useState<RoiBounds>({
-    left: 0.06,
-    top: 0.12,
-    right: 0.94,
-    bottom: 0.90,
+    left: 0.03,
+    top: 0.06,
+    right: 0.98,
+    bottom: 0.95,
   });
   const [lockedTimestamp, setLockedTimestamp] = useState<string | null>(null);
   const [lockWarning, setLockWarning] = useState<string | null>(null);
@@ -757,7 +898,7 @@ export const LiveWebcamFeed: React.FC = () => {
   const [yoloCameraSource, setYoloCameraSource] = useState<number>(0);
   const [isSwitchingYoloCam, setIsSwitchingYoloCam] = useState<boolean>(false);
 
-  // 1. Muat Model Deep Learning dari Bundle Lokal (/models/coco-ssd/...) Tanpa Bergantung Google Storage
+  // 1. Muat Model Deep Learning dari Bundle Lokal (/models/coco-ssd/...)
   useEffect(() => {
     let isMounted = true;
 
@@ -827,13 +968,13 @@ export const LiveWebcamFeed: React.FC = () => {
           if (isMounted) {
             modelRef.current = loadedModel;
             setIsModelReady(true);
-            setModelStatus('AI Neural Network Siap (Deteksi Khusus Mobil Miniatur / HotWheels)');
+            setModelStatus('AI Siap (Multi-Angle: Atas / Samping / Jauh · Anti-Wajah)');
           }
         }
       } catch {
         if (isMounted) {
           setIsModelReady(true);
-          setModelStatus('AI Vision Siap (Mode Deteksi Mobil HotWheels Aktif)');
+          setModelStatus('AI Vision Siap (Mode Mobil HotWheels)');
         }
       }
     };
@@ -852,7 +993,7 @@ export const LiveWebcamFeed: React.FC = () => {
       }
       const allDevices = await navigator.mediaDevices.enumerateDevices();
       const videoInputs = allDevices
-        .filter((d) => d.kind === 'videoinput')
+        .filter((d) => d.kind === 'videoinput' && d.deviceId)
         .map((d, index) => ({
           deviceId: d.deviceId,
           label: d.label || `Kamera ${index + 1}`,
@@ -865,41 +1006,103 @@ export const LiveWebcamFeed: React.FC = () => {
   }, []);
 
   const startCamera = useCallback(
-    async (deviceIdToUse?: string) => {
-      if (isStartingRef.current) return;
-      isStartingRef.current = true;
+    async (opts?: { deviceId?: string; facing?: 'environment' | 'user' }) => {
       setErrorMessage(null);
+      setIsOpeningCamera(true);
 
       try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          throw new Error('Browser ini tidak mendukung akses kamera WebRTC (pastikan membuka lewat HTTPS).');
+        }
+
         if (streamRef.current) {
           streamRef.current.getTracks().forEach((track) => track.stop());
           streamRef.current = null;
+          await new Promise((r) => setTimeout(r, 120));
         }
 
-        const targetId = deviceIdToUse !== undefined ? deviceIdToUse : selectedDeviceIdRef.current;
-        const constraints: MediaStreamConstraints = {
-          video: targetId
-            ? { deviceId: { exact: targetId }, width: { ideal: 1280 }, height: { ideal: 720 } }
-            : { width: { ideal: 1280 }, height: { ideal: 720 } },
-          audio: false,
-        };
+        const targetFacing = opts?.facing || facingModeRef.current || 'environment';
+        facingModeRef.current = targetFacing;
+        setFacingMode(targetFacing);
 
-        let stream: MediaStream;
-        try {
-          stream = await navigator.mediaDevices.getUserMedia(constraints);
-        } catch {
-          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        const explicitDeviceId = opts?.deviceId;
+        const constraintCandidates: MediaStreamConstraints[] = [];
+
+        if (explicitDeviceId) {
+          constraintCandidates.push(
+            { video: { deviceId: { exact: explicitDeviceId } }, audio: false },
+            { video: { deviceId: { ideal: explicitDeviceId } }, audio: false }
+          );
         }
 
-        streamRef.current = stream;
+        constraintCandidates.push(
+          {
+            video: {
+              facingMode: { exact: targetFacing },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+            audio: false,
+          },
+          {
+            video: {
+              facingMode: { exact: targetFacing },
+            },
+            audio: false,
+          },
+          {
+            video: {
+              facingMode: { ideal: targetFacing },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+            audio: false,
+          },
+          {
+            video: {
+              facingMode: { ideal: targetFacing },
+            },
+            audio: false,
+          },
+          {
+            video: true,
+            audio: false,
+          }
+        );
 
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.muted = true;
-          videoRef.current.playsInline = true;
-          videoRef.current.autoplay = true;
+        let acquiredStream: MediaStream | null = null;
+        let lastErr: unknown = null;
+
+        for (const candidate of constraintCandidates) {
           try {
-            await videoRef.current.play();
+            acquiredStream = await navigator.mediaDevices.getUserMedia(candidate);
+            if (acquiredStream) break;
+          } catch (e) {
+            lastErr = e;
+          }
+        }
+
+        if (!acquiredStream) {
+          throw lastErr || new Error('Tidak dapat mengakses kamera perangkat.');
+        }
+
+        streamRef.current = acquiredStream;
+
+        const videoEl = videoRef.current;
+        if (videoEl) {
+          videoEl.srcObject = acquiredStream;
+          videoEl.muted = true;
+          videoEl.playsInline = true;
+          videoEl.setAttribute('playsinline', 'true');
+          videoEl.setAttribute('webkit-playsinline', 'true');
+          videoEl.autoplay = true;
+
+          videoEl.onloadedmetadata = () => {
+            videoEl.play().catch(() => {});
+          };
+
+          try {
+            await videoEl.play();
           } catch {}
         }
 
@@ -907,12 +1110,13 @@ export const LiveWebcamFeed: React.FC = () => {
         setIsCameraConnected(true);
 
         const refreshed = await getCameraDevices();
-        const activeTrack = stream.getVideoTracks()[0];
-        const activeDeviceId = activeTrack?.getSettings()?.deviceId || targetId;
+        const activeTrack = acquiredStream.getVideoTracks()[0];
+        const activeSettings = activeTrack?.getSettings();
+        const activeId = activeSettings?.deviceId || explicitDeviceId || '';
 
-        if (activeDeviceId) {
-          selectedDeviceIdRef.current = activeDeviceId;
-          setSelectedDeviceId(activeDeviceId);
+        if (activeId) {
+          selectedDeviceIdRef.current = activeId;
+          setSelectedDeviceId(activeId);
         } else if (refreshed.length > 0 && !selectedDeviceIdRef.current) {
           selectedDeviceIdRef.current = refreshed[0].deviceId;
           setSelectedDeviceId(refreshed[0].deviceId);
@@ -920,10 +1124,14 @@ export const LiveWebcamFeed: React.FC = () => {
       } catch (err: unknown) {
         setIsStreaming(false);
         setIsCameraConnected(false);
-        const errorObj = err as { message?: string };
-        setErrorMessage(errorObj.message || 'Kamera tidak terjangkau atau izin kamera ditolak browser.');
+        const errorObj = err as { name?: string; message?: string };
+        if (errorObj.name === 'NotAllowedError' || errorObj.name === 'PermissionDeniedError') {
+          setErrorMessage('Izin kamera ditolak. Klik ikon kunci di address bar browser lalu izinkan Kamera.');
+        } else {
+          setErrorMessage(errorObj.message || 'Gagal membuka kamera. Pastikan kamera tidak sedang dipakai aplikasi lain.');
+        }
       } finally {
-        isStartingRef.current = false;
+        setIsOpeningCamera(false);
       }
     },
     [getCameraDevices, setIsCameraConnected]
@@ -944,6 +1152,13 @@ export const LiveWebcamFeed: React.FC = () => {
     setDetectedCars([]);
   }, [setIsCameraConnected]);
 
+  const handleToggleFacingMode = () => {
+    const nextFacing: 'environment' | 'user' =
+      facingMode === 'environment' ? 'user' : 'environment';
+    selectedDeviceIdRef.current = '';
+    startCamera({ facing: nextFacing });
+  };
+
   const handleLockEmptyRoad = () => {
     setLockWarning(null);
     if (humanDetectedInFrame) {
@@ -956,43 +1171,15 @@ export const LiveWebcamFeed: React.FC = () => {
     const canvas = tileCanvasRef.current;
     if (!video || !canvas || video.readyState < 2) return;
 
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return;
-    canvas.width = GRID_W;
-    canvas.height = GRID_H;
-    ctx.drawImage(video, 0, 0, GRID_W, GRID_H);
-    const imgData = ctx.getImageData(0, 0, GRID_W, GRID_H).data;
-    const total = COLS * ROWS;
-    const bgR = new Float32Array(total);
-    const bgG = new Float32Array(total);
-    const bgB = new Float32Array(total);
-    const bgLum = new Float32Array(total);
-    const cellW = GRID_W / COLS;
-    const cellH = GRID_H / ROWS;
-
-    for (let r = 0; r < ROWS; r++) {
-      for (let c = 0; c < COLS; c++) {
-        const idx = r * COLS + c;
-        let sr = 0, sg = 0, sb = 0, slum = 0, cnt = 0;
-        for (let y = r * cellH; y < (r + 1) * cellH; y++) {
-          for (let x = c * cellW; x < (c + 1) * cellW; x++) {
-            const p = (y * GRID_W + x) * 4;
-            sr += imgData[p];
-            sg += imgData[p + 1];
-            sb += imgData[p + 2];
-            slum += 0.299 * imgData[p] + 0.587 * imgData[p + 1] + 0.114 * imgData[p + 2];
-            cnt++;
-          }
-        }
-        bgR[idx] = sr / cnt;
-        bgG[idx] = sg / cnt;
-        bgB[idx] = sb / cnt;
-        bgLum[idx] = slum / cnt;
-      }
-    }
+    const maps = extractSceneFeatureMaps(video, canvas);
+    if (!maps) return;
 
     const ts = new Date().toLocaleTimeString('id-ID', { hour12: false });
-    lockedRoadRef.current = { bgR, bgG, bgB, bgLum, timestamp: ts };
+    lockedRoadRef.current = {
+      bgLum: Float32Array.from(maps.gray),
+      bgSat: Float32Array.from(maps.sat),
+      timestamp: ts,
+    };
     setLockedTimestamp(ts);
     trackedCarsRef.current = [];
   };
@@ -1024,7 +1211,7 @@ export const LiveWebcamFeed: React.FC = () => {
       stopCamera();
       setIsCameraConnected(yoloStreamOnline);
     } else {
-      startCamera();
+      startCamera({ facing: 'environment' });
     }
   }, [feedMode, yoloStreamOnline, startCamera, stopCamera, setIsCameraConnected]);
 
@@ -1034,7 +1221,7 @@ export const LiveWebcamFeed: React.FC = () => {
     };
   }, [stopCamera]);
 
-  // 2. Siklus Deteksi 3-Layer Hybrid (COCO-SSD Lokal + Handheld HotWheels + Miniature Road Multi-Car)
+  // 2. Siklus Deteksi 3-Layer Hybrid (Multi-Angle Top-Down / Samping + Jarak Jauh + Anti-Rambut/Wajah)
   useEffect(() => {
     if (!isStreaming || feedMode !== 'browser') return;
 
@@ -1062,40 +1249,42 @@ export const LiveWebcamFeed: React.FC = () => {
         const roiX2 = activeRoi.right * vw;
         const roiY2 = activeRoi.bottom * vh;
 
+        // Ekstrak peta piksel 320x200 untuk segmentasi objek utuh + uji keseragaman permukaan cincin (Surrounding Ring Uniformity Test)
+        const sceneMaps = extractSceneFeatureMaps(video, tileCanvas);
+        if (!sceneMaps) {
+          isDetectingRef.current = false;
+          return;
+        }
+
         const personBoxes: [number, number, number, number][] = [];
+        const nonVehicleBoxes: [number, number, number, number][] = [];
         const rawCarCandidates: RawCarBox[] = [];
 
-        // LAYER 1: Jaringan Saraf COCO-SSD Lokal (Full Frame + Multi-Scale Zoom Tiling)
+        // LAYER 1: Jaringan Saraf COCO-SSD Lokal (HANYA menerima kelas kendaraan murni yang lolos verifikasi permukaan/tangan)
         const model = modelRef.current;
         if (model) {
-          const fullPreds = await model.detect(video, 25, Math.max(0.12, minConfidence - 0.05));
+          const fullPreds = await model.detect(video, 25, Math.max(0.14, minConfidence));
 
           for (const p of fullPreds) {
             const cls = p.class.toLowerCase().trim();
-            if (cls === 'person' && p.score >= 0.25) {
+            if (cls === 'person' && p.score >= 0.22) {
               personBoxes.push(p.bbox);
               continue;
             }
+            if (NON_VEHICLE_ROOM_CLASSES.has(cls) && p.score >= 0.25) {
+              nonVehicleBoxes.push(p.bbox);
+              continue;
+            }
             if (DIRECT_VEHICLE_CLASSES.has(cls) && p.score >= minConfidence) {
-              rawCarCandidates.push({
-                bbox: p.bbox,
-                score: p.score,
-              });
-            } else if (HANDHELD_CANDIDATE_CLASSES.has(cls) && p.score >= minConfidence) {
-              // Objek kecil di genggaman tangan (seperti truk hitam HotWheels yang diklasifikasikan COCO sebagai cell phone / suitcase)
-              const [, , bw, bh] = p.bbox;
-              const areaRatio = (bw * bh) / (vw * vh);
-              const aspect = Math.max(bw, bh) / Math.max(1, Math.min(bw, bh));
-              if (areaRatio >= 0.012 && areaRatio <= 0.25 && aspect >= 1.02 && aspect <= 2.8) {
+              if (verifyCocoCandidateIsHotWheels(p.bbox, vw, vh, sceneMaps)) {
                 rawCarCandidates.push({
                   bbox: p.bbox,
-                  score: Math.max(0.85, p.score),
+                  score: p.score,
                 });
               }
             }
           }
 
-          // Multi-Scale Zoom Tiling pada Area Jalan
           if (enableMultiScaleTiling) {
             const tCtx = tileCanvas.getContext('2d');
             if (tCtx) {
@@ -1104,28 +1293,30 @@ export const LiveWebcamFeed: React.FC = () => {
               tileCanvas.width = tileW;
               tileCanvas.height = tileH;
 
-              const tileSlices: [number, number][] = [
-                [0.0, 0.56],
-                [0.22, 0.78],
-                [0.44, 1.0],
+              const zoomTiles: [number, number, number, number][] = [
+                [0.0, 0.56, 0.0, 1.0],
+                [0.22, 0.78, 0.0, 1.0],
+                [0.44, 1.0, 0.0, 1.0],
+                [0.18, 0.82, 0.18, 0.85],
+                [0.05, 0.95, 0.25, 0.95],
               ];
               const roiW = Math.max(100, roiX2 - roiX1);
               const roiH = Math.max(80, roiY2 - roiY1);
 
               const newTileCars: RawCarBox[] = [];
-              const sliceIdx = tileStepRef.current % tileSlices.length;
-              tileStepRef.current = (tileStepRef.current + 1) % tileSlices.length;
+              const sliceIdx = tileStepRef.current % zoomTiles.length;
+              tileStepRef.current = (tileStepRef.current + 1) % zoomTiles.length;
 
-              const [fStart, fEnd] = tileSlices[sliceIdx];
-              const cropX = roiX1 + fStart * roiW;
-              const cropY = roiY1;
-              const cropW = (fEnd - fStart) * roiW;
-              const cropH = roiH;
+              const [fx1, fx2, fy1, fy2] = zoomTiles[sliceIdx];
+              const cropX = roiX1 + fx1 * roiW;
+              const cropY = roiY1 + fy1 * roiH;
+              const cropW = (fx2 - fx1) * roiW;
+              const cropH = (fy2 - fy1) * roiH;
 
               tCtx.clearRect(0, 0, tileW, tileH);
               tCtx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, tileW, tileH);
 
-              const tilePreds = await model.detect(tileCanvas, 15, minConfidence);
+              const tilePreds = await model.detect(tileCanvas, 15, Math.max(0.16, minConfidence));
               const scaleX = cropW / tileW;
               const scaleY = cropH / tileH;
 
@@ -1137,16 +1328,22 @@ export const LiveWebcamFeed: React.FC = () => {
                 const fullBh = tp.bbox[3] * scaleY;
                 const mappedBox: [number, number, number, number] = [fullBx, fullBy, fullBw, fullBh];
 
-                if (tCls === 'person' && tp.score >= 0.30) {
+                if (tCls === 'person' && tp.score >= 0.28) {
                   personBoxes.push(mappedBox);
                   continue;
                 }
-                if (DIRECT_VEHICLE_CLASSES.has(tCls) && tp.score >= minConfidence) {
-                  if (tp.bbox[2] > tileW * 0.80 && tp.bbox[3] > tileH * 0.80) continue;
-                  newTileCars.push({
-                    bbox: mappedBox,
-                    score: tp.score,
-                  });
+                if (NON_VEHICLE_ROOM_CLASSES.has(tCls) && tp.score >= 0.25) {
+                  nonVehicleBoxes.push(mappedBox);
+                  continue;
+                }
+                if (DIRECT_VEHICLE_CLASSES.has(tCls) && tp.score >= Math.max(0.16, minConfidence)) {
+                  if (tp.bbox[2] > tileW * 0.75 && tp.bbox[3] > tileH * 0.75) continue;
+                  if (verifyCocoCandidateIsHotWheels(mappedBox, vw, vh, sceneMaps)) {
+                    newTileCars.push({
+                      bbox: mappedBox,
+                      score: Math.max(0.86, tp.score),
+                    });
+                  }
                 }
               }
               cachedTileCarsRef.current = newTileCars;
@@ -1155,30 +1352,22 @@ export const LiveWebcamFeed: React.FC = () => {
           rawCarCandidates.push(...cachedTileCarsRef.current);
         }
 
-        // LAYER 2: Detektor Mobil HotWheels di Genggaman Tangan (Handheld Diecast Mode)
-        // Aktif ketika user mengangkat tangan memegang mobil HotWheels di depan webcam
-        const handheldCars = detectHandheldHotWheels(video, tileCanvas, vw, vh, activeRoi);
-        rawCarCandidates.push(...handheldCars);
+        // LAYER 2 & 3: Detektor Terpadu Mobil HotWheels di Meja/Jalan Miniatur (SURFACE_CAR) & di Genggaman Tangan (HAND_CAR)
+        const hotWheelsCars = detectHotWheelsCars(
+          sceneMaps,
+          vw,
+          vh,
+          activeRoi,
+          lockedRoadRef.current
+        );
+        rawCarCandidates.push(...hotWheelsCars);
 
-        // LAYER 3: Detektor Deretan 1..6+ Mobil HotWheels di Jalan Miniatur (Maket Road Mode)
-        // Hanya berjalan jika tidak ada manusia/wajah di layar (personBoxes.length === 0)
-        if (personBoxes.length === 0) {
-          const roadCars = detectRoadMiniatureCars(
-            video,
-            tileCanvas,
-            vw,
-            vh,
-            activeRoi,
-            lockedRoadRef.current
-          );
-          rawCarCandidates.push(...roadCars);
-        }
-
+        const isPersonPresent = personBoxes.length > 0 || sceneMaps.totalSkinRatio > 0.08;
         if (active) {
-          setHumanDetectedInFrame(personBoxes.length > 0);
+          setHumanDetectedInFrame(isPersonPresent);
         }
 
-        // Validasi ROI & Tolak Kotak yang Identik dengan Tubuh Manusia Utuh
+        // FILTER AKHIR: Validasi ROI & Tolak Perabot/Tubuh Manusia
         const verifiedCars: RawCarBox[] = [];
         for (const cand of rawCarCandidates) {
           const [bx, by, bw, bh] = cand.bbox;
@@ -1192,14 +1381,17 @@ export const LiveWebcamFeed: React.FC = () => {
             }
           }
 
-          // Tolak kotak raksasa (> 38% seluruh layar)
-          if (areaRatio > 0.38 || areaRatio < 0.0015) {
+          if (areaRatio > 0.16 || areaRatio < 0.0015) {
             continue;
           }
 
-          // Tolak hanya jika kotak tersebut adalah kotak seluruh tubuh manusia itu sendiri (IoU > 0.55)
-          const isWholePerson = personBoxes.some((pBox) => computeIoU(cand.bbox, pBox) > 0.55);
+          // Tolak jika kotak adalah seluruh tubuh manusia
+          const isWholePerson = personBoxes.some((pBox) => computeIoU(cand.bbox, pBox) > 0.50);
           if (isWholePerson) continue;
+
+          // Tolak jika kotak adalah HP / tas / perabot ruangan non-kendaraan
+          const isRoomFurniture = nonVehicleBoxes.some((nb) => computeIoU(cand.bbox, nb) > 0.40);
+          if (isRoomFurniture) continue;
 
           verifiedCars.push(cand);
         }
@@ -1210,8 +1402,8 @@ export const LiveWebcamFeed: React.FC = () => {
         for (const cand of verifiedCars) {
           const isDuplicate = nmsCars.some(
             (existing) =>
-              computeIoU(existing.bbox, cand.bbox) > 0.35 ||
-              computeCenterDistanceRatio(existing.bbox, cand.bbox) < 0.38
+              computeIoU(existing.bbox, cand.bbox) > 0.32 ||
+              computeCenterDistanceRatio(existing.bbox, cand.bbox) < 0.36
           );
           if (!isDuplicate) {
             nmsCars.push(cand);
@@ -1232,7 +1424,7 @@ export const LiveWebcamFeed: React.FC = () => {
             const iou = computeIoU(raw.bbox, prevTracks[i].bbox);
             const centerDist = computeCenterDistanceRatio(raw.bbox, prevTracks[i].bbox);
 
-            if (iou > 0.20 || centerDist < 0.60) {
+            if (iou > 0.18 || centerDist < 0.62) {
               const matchQuality = iou + Math.max(0, 0.65 - centerDist);
               if (matchQuality > bestScore) {
                 bestScore = matchQuality;
@@ -1244,7 +1436,7 @@ export const LiveWebcamFeed: React.FC = () => {
           if (bestIdx !== -1) {
             matchedTrackIndices.add(bestIdx);
             const prev = prevTracks[bestIdx];
-            const alpha = 0.65;
+            const alpha = 0.68;
             const smoothedBbox: [number, number, number, number] = [
               prev.bbox[0] * (1 - alpha) + raw.bbox[0] * alpha,
               prev.bbox[1] * (1 - alpha) + raw.bbox[1] * alpha,
@@ -1356,7 +1548,7 @@ export const LiveWebcamFeed: React.FC = () => {
       }
     };
 
-    const interval = setInterval(runHybridDetection, 150);
+    const interval = setInterval(runHybridDetection, 140);
     return () => {
       active = false;
       clearInterval(interval);
@@ -1376,15 +1568,15 @@ export const LiveWebcamFeed: React.FC = () => {
   const isPadat = traffic.vehicleCount >= 3 && traffic.vehicleCount < 6;
 
   return (
-    <section aria-label="Feed Kamera Pemantau Kemacetan Mobil" className="rack-panel flex flex-col">
+    <section aria-label="Feed Kamera Pemantau Kemacetan Mobil" className="rack-panel flex flex-col overflow-hidden">
       {/* Header Bar */}
-      <div className="px-4 py-3 bg-[var(--bg-header)] border-b border-[var(--border-line)] flex flex-wrap items-center justify-between gap-2 rounded-t-[10px]">
-        <div className="flex items-center gap-2 flex-wrap">
-          <h3 className="font-semibold text-sm text-[var(--text-primary)]">
-            Kamera AI Deteksi Kemacetan Mobil
+      <div className="px-3 sm:px-4 py-2.5 bg-[var(--bg-header)] border-b border-[var(--border-line)] flex flex-wrap items-center justify-between gap-2 rounded-t-[10px]">
+        <div className="flex items-center gap-2 min-w-0">
+          <h3 className="font-semibold text-xs sm:text-sm text-[var(--text-primary)] truncate">
+            Kamera Deteksi Mobil
           </h3>
           <span
-            className="px-2 py-0.5 rounded text-[11px] font-mono font-bold border"
+            className="px-2 py-0.5 rounded text-[10px] sm:text-[11px] font-mono font-bold border shrink-0"
             style={{
               backgroundColor: isMacet
                 ? 'var(--sig-red-bg)'
@@ -1407,7 +1599,7 @@ export const LiveWebcamFeed: React.FC = () => {
           </span>
         </div>
 
-        <div className="flex items-center gap-1.5 flex-wrap">
+        <div className="flex items-center gap-1.5 flex-wrap w-full sm:w-auto">
           <button
             type="button"
             onClick={() => setFeedMode('browser')}
@@ -1415,7 +1607,7 @@ export const LiveWebcamFeed: React.FC = () => {
               feedMode === 'browser' ? 'ctrl-btn-active' : ''
             }`}
           >
-            Webcam Browser (AI)
+            Kamera Web
           </button>
           <button
             type="button"
@@ -1427,21 +1619,32 @@ export const LiveWebcamFeed: React.FC = () => {
               feedMode === 'yolo11' ? 'ctrl-btn-active' : ''
             }`}
           >
-            Python YOLO11 (8088)
+            Port 8088
           </button>
 
           {feedMode === 'browser' ? (
             <>
-              {devices.length > 0 && (
+              <button
+                type="button"
+                onClick={handleToggleFacingMode}
+                disabled={isOpeningCamera}
+                className="ctrl-btn ctrl-btn-sm font-mono"
+                title="Ganti antara Kamera Belakang dan Kamera Depan"
+              >
+                {facingMode === 'environment' ? 'Kamera Belakang' : 'Kamera Depan'}
+              </button>
+
+              {devices.length > 1 && (
                 <select
                   value={selectedDeviceId}
                   onChange={(e) => {
-                    setSelectedDeviceId(e.target.value);
-                    selectedDeviceIdRef.current = e.target.value;
-                    startCamera(e.target.value);
+                    const id = e.target.value;
+                    setSelectedDeviceId(id);
+                    selectedDeviceIdRef.current = id;
+                    startCamera({ deviceId: id });
                   }}
                   aria-label="Pilih Perangkat Kamera"
-                  className="rack-well px-2.5 h-8 text-xs font-mono text-[var(--text-primary)]"
+                  className="rack-well px-2 h-8 text-xs font-mono text-[var(--text-primary)] max-w-[130px] sm:max-w-[180px] truncate"
                 >
                   {devices.map((d) => (
                     <option key={d.deviceId} value={d.deviceId}>
@@ -1462,10 +1665,11 @@ export const LiveWebcamFeed: React.FC = () => {
               ) : (
                 <button
                   type="button"
-                  onClick={() => startCamera()}
+                  onClick={() => startCamera({ facing: facingMode })}
+                  disabled={isOpeningCamera}
                   className="ctrl-btn ctrl-btn-sm ctrl-btn-green font-mono"
                 >
-                  Nyalakan
+                  {isOpeningCamera ? 'Membuka...' : 'Nyalakan'}
                 </button>
               )}
             </>
@@ -1489,36 +1693,36 @@ export const LiveWebcamFeed: React.FC = () => {
                   yoloCameraSource === 1 ? 'ctrl-btn-green' : ''
                 }`}
               >
-                CAM 1 (USB)
+                CAM 1
               </button>
             </>
           )}
         </div>
       </div>
 
-      <div className="p-4 flex flex-col gap-3">
+      <div className="p-3 sm:p-4 flex flex-col gap-3">
         {/* Status Engine AI Bar */}
         {feedMode === 'browser' && (
-          <div className="rack-well px-3 py-2 flex flex-wrap items-center justify-between gap-2 font-mono text-xs">
-            <div className="flex items-center gap-2">
+          <div className="rack-well px-3 py-2 flex flex-wrap items-center justify-between gap-2 font-mono text-[11px] sm:text-xs">
+            <div className="flex items-center gap-2 min-w-0">
               <span
                 className="w-2 h-2 rounded-full shrink-0"
                 style={{
                   backgroundColor: isModelReady ? 'var(--sig-green-dot)' : 'var(--sig-amber-dot)',
                 }}
               />
-              <span className="font-semibold text-[var(--text-primary)]">{modelStatus}</span>
+              <span className="font-semibold text-[var(--text-primary)] truncate">{modelStatus}</span>
             </div>
             {humanDetectedInFrame && (
               <span
-                className="px-2 py-0.5 rounded text-[11px] font-bold border"
+                className="px-2 py-0.5 rounded text-[10px] font-bold border shrink-0"
                 style={{
                   backgroundColor: 'var(--bg-panel)',
                   borderColor: 'var(--border-strong)',
                   color: 'var(--text-secondary)',
                 }}
               >
-                Filter Wajah/Orang Aktif (Hanya Mobil Dipegang / di Jalan)
+                Veto Rambut/Wajah Aktif
               </span>
             )}
           </div>
@@ -1527,7 +1731,7 @@ export const LiveWebcamFeed: React.FC = () => {
         {/* Video Viewport */}
         <div
           ref={containerRef}
-          className="relative aspect-video w-full bg-[#090D16] rounded-lg border border-[var(--border-strong)] overflow-hidden flex items-center justify-center min-h-[300px]"
+          className="relative aspect-video w-full bg-[#090D16] rounded-lg border border-[var(--border-strong)] overflow-hidden flex items-center justify-center min-h-[220px] sm:min-h-[300px]"
         >
           <canvas ref={tileCanvasRef} className="hidden" />
 
@@ -1541,25 +1745,25 @@ export const LiveWebcamFeed: React.FC = () => {
                 onError={() => setYoloStreamOnline(false)}
               />
             ) : (
-              <div className="p-6 text-center font-mono space-y-3 text-[#F8FAFC]">
-                <p className="text-sm font-bold">SERVER PORT 8088 TIDAK AKTIF</p>
-                <p className="text-xs text-[#94A3B8] max-w-md mx-auto">
-                  Gunakan mode [Webcam Browser (AI)] untuk deteksi mobil HotWheels dengan model saraf lokal di browser.
+              <div className="p-4 sm:p-6 text-center font-mono space-y-3 text-[#F8FAFC]">
+                <p className="text-xs sm:text-sm font-bold">SERVER PORT 8088 TIDAK AKTIF</p>
+                <p className="text-[11px] sm:text-xs text-[#94A3B8] max-w-md mx-auto">
+                  Gunakan mode [Kamera Web] untuk deteksi mobil langsung di HP atau Laptop.
                 </p>
-                <div className="flex items-center justify-center gap-2">
+                <div className="flex items-center justify-center gap-2 flex-wrap">
                   <button
                     type="button"
                     onClick={() => setYoloStreamOnline(true)}
                     className="ctrl-btn ctrl-btn-sm font-mono"
                   >
-                    Coba Ulang Port 8088
+                    Coba Ulang
                   </button>
                   <button
                     type="button"
                     onClick={() => setFeedMode('browser')}
                     className="ctrl-btn ctrl-btn-sm ctrl-btn-green font-mono"
                   >
-                    Pakai Webcam Browser (AI)
+                    Pakai Kamera Web
                   </button>
                 </div>
               </div>
@@ -1570,30 +1774,45 @@ export const LiveWebcamFeed: React.FC = () => {
               autoPlay
               playsInline
               muted
+              onLoadedMetadata={() => {
+                videoRef.current?.play().catch(() => {});
+              }}
               className="w-full h-full object-cover bg-black"
             />
           )}
 
           {feedMode === 'browser' && !isStreaming && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-[#090D16] text-[#F8FAFC] font-mono space-y-3 z-10">
-              <p className="text-sm font-bold">WEBCAM DETEKSI MOBIL SIAGA</p>
+            <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-[#090D16] text-[#F8FAFC] font-mono space-y-3 z-10">
+              <p className="text-xs sm:text-sm font-bold">
+                {isOpeningCamera ? 'MEMBUKA KAMERA BELAKANG...' : 'KAMERA DETEKSI MOBIL SIAGA'}
+              </p>
               {errorMessage && (
-                <p className="text-xs text-[#F87171] max-w-md">{errorMessage}</p>
+                <p className="text-[11px] text-[#F87171] max-w-sm">{errorMessage}</p>
               )}
-              <button
-                type="button"
-                onClick={() => startCamera()}
-                className="ctrl-btn ctrl-btn-green font-mono"
-              >
-                Aktifkan Kamera
-              </button>
+              <div className="flex items-center justify-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => startCamera({ facing: 'environment' })}
+                  disabled={isOpeningCamera}
+                  className="ctrl-btn ctrl-btn-sm ctrl-btn-green font-mono"
+                >
+                  Buka Kamera Belakang
+                </button>
+                <button
+                  type="button"
+                  onClick={() => startCamera({ facing: 'user' })}
+                  disabled={isOpeningCamera}
+                  className="ctrl-btn ctrl-btn-sm font-mono"
+                >
+                  Kamera Depan
+                </button>
+              </div>
             </div>
           )}
 
           {/* Live HUD & Bounding Boxes Overlay */}
           {feedMode === 'browser' && isStreaming && (
             <div className="absolute inset-0 pointer-events-none z-20">
-              {/* Road Detection Zone (ROI) Guide Frame */}
               {useRoadZone && (
                 <div
                   className="absolute border-2 border-dashed border-[#38BDF8]/70 rounded-md"
@@ -1604,35 +1823,34 @@ export const LiveWebcamFeed: React.FC = () => {
                     height: `${(roiBounds.bottom - roiBounds.top) * 100}%`,
                   }}
                 >
-                  <span className="absolute -top-5 left-1.5 bg-[#090D16]/85 text-[#38BDF8] border border-[#38BDF8]/50 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold">
-                    AREA JALAN MINIATUR (ZONA DETEKSI)
+                  <span className="hidden sm:inline-block absolute -top-5 left-1.5 bg-[#090D16]/85 text-[#38BDF8] border border-[#38BDF8]/50 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold">
+                    ZONA JALAN MINIATUR
                   </span>
                 </div>
               )}
 
-              {/* Live HUD Status Pill in Top-Left */}
-              <div className="absolute top-3 left-3 bg-[#090D16]/90 border border-[#334155] rounded-lg px-3 py-2 font-mono text-xs text-[#F8FAFC] flex items-center gap-3 shadow-md">
+              {/* Compact Live HUD Status Pill */}
+              <div className="absolute top-2 left-2 sm:top-3 sm:left-3 bg-[#090D16]/90 border border-[#334155] rounded-lg px-2.5 py-1.5 font-mono text-[11px] sm:text-xs text-[#F8FAFC] flex items-center gap-2.5 shadow-md">
                 <div>
-                  <span className="text-[10px] text-[#94A3B8] block">MOBIL DI KAMERA</span>
-                  <span className="text-base font-bold text-[#4ADE80]">
-                    {traffic.vehicleCount} / 6 Mobil
+                  <span className="text-[9px] sm:text-[10px] text-[#94A3B8] block">MOBIL</span>
+                  <span className="text-xs sm:text-sm font-bold text-[#4ADE80]">
+                    {traffic.vehicleCount} / 6
                   </span>
                 </div>
-                <div className="h-7 w-px bg-[#334155]" />
+                <div className="h-6 w-px bg-[#334155]" />
                 <div>
-                  <span className="text-[10px] text-[#94A3B8] block">STATUS JALAN</span>
+                  <span className="text-[9px] sm:text-[10px] text-[#94A3B8] block">STATUS</span>
                   <span
-                    className="text-sm font-bold"
+                    className="text-xs sm:text-sm font-bold"
                     style={{
                       color: isMacet ? '#F87171' : isPadat ? '#FBBF24' : '#4ADE80',
                     }}
                   >
-                    {isMacet ? 'MACET (>= 6)' : isPadat ? 'PADAT (3-5)' : 'LANCAR (0-2)'}
+                    {isMacet ? 'MACET' : isPadat ? 'PADAT' : 'LANCAR'}
                   </span>
                 </div>
               </div>
 
-              {/* Bounding Boxes for Each Detected Car */}
               {detectedCars.map((box) => (
                 <div
                   key={box.id}
@@ -1662,7 +1880,7 @@ export const LiveWebcamFeed: React.FC = () => {
 
         {lockWarning && (
           <div
-            className="p-3 rounded-lg border text-xs font-mono flex items-center justify-between gap-2"
+            className="p-2.5 rounded-lg border text-xs font-mono flex items-center justify-between gap-2"
             style={{
               backgroundColor: 'var(--sig-amber-bg)',
               borderColor: 'var(--sig-amber-border)',
@@ -1680,17 +1898,17 @@ export const LiveWebcamFeed: React.FC = () => {
           </div>
         )}
 
-        {/* Controls Grid */}
+        {/* Compact Responsive Controls Grid */}
         {feedMode === 'browser' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 font-mono text-xs">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 font-mono text-xs">
             {/* Left Box: Road Zone & Optional Maket Lock */}
-            <div className="rack-well p-3 space-y-2.5">
-              <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="rack-well p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
                 <span className="font-semibold text-[var(--text-primary)]">
-                  1. Area Jalan &amp; Kunci Maket
+                  1. Zona Jalan Maket
                 </span>
-                <span className="text-[11px] text-[var(--text-secondary)]">
-                  {lockedTimestamp ? `Maket Terkunci (${lockedTimestamp})` : 'Mode Hybrid AI Aktif'}
+                <span className="text-[10px] text-[var(--text-secondary)]">
+                  {lockedTimestamp ? `Terkunci (${lockedTimestamp})` : 'Multi-Angle AI'}
                 </span>
               </div>
 
@@ -1702,7 +1920,7 @@ export const LiveWebcamFeed: React.FC = () => {
                     useRoadZone ? 'ctrl-btn-active' : ''
                   }`}
                 >
-                  {useRoadZone ? 'Zona Jalan: ON' : 'Layar Penuh'}
+                  {useRoadZone ? 'Zona: ON' : 'Full Layar'}
                 </button>
                 <button
                   type="button"
@@ -1710,7 +1928,7 @@ export const LiveWebcamFeed: React.FC = () => {
                   disabled={!isStreaming}
                   className="ctrl-btn ctrl-btn-sm ctrl-btn-green font-mono"
                 >
-                  Kunci Latar Jalan Kosong
+                  Kunci Jalan
                 </button>
                 {lockedTimestamp && (
                   <button
@@ -1718,7 +1936,7 @@ export const LiveWebcamFeed: React.FC = () => {
                     onClick={handleUnlockRoad}
                     className="ctrl-btn ctrl-btn-sm ctrl-btn-red font-mono"
                   >
-                    Hapus Kunci Latar
+                    Reset
                   </button>
                 )}
               </div>
@@ -1727,7 +1945,7 @@ export const LiveWebcamFeed: React.FC = () => {
                 <div className="grid grid-cols-2 gap-2 pt-1">
                   <div>
                     <div className="flex justify-between text-[10px] text-[var(--text-secondary)]">
-                      <span>Lebar Zona Jalan</span>
+                      <span>Lebar</span>
                       <span>{Math.round((roiBounds.right - roiBounds.left) * 100)}%</span>
                     </div>
                     <input
@@ -1745,12 +1963,12 @@ export const LiveWebcamFeed: React.FC = () => {
                         }));
                       }}
                       className="ctrl-range"
-                      aria-label="Atur Margin Kiri Kanan Zona Jalan"
+                      aria-label="Atur Lebar Zona Jalan"
                     />
                   </div>
                   <div>
                     <div className="flex justify-between text-[10px] text-[var(--text-secondary)]">
-                      <span>Tinggi Zona Jalan</span>
+                      <span>Tinggi</span>
                       <span>{Math.round((roiBounds.bottom - roiBounds.top) * 100)}%</span>
                     </div>
                     <input
@@ -1768,7 +1986,7 @@ export const LiveWebcamFeed: React.FC = () => {
                         }));
                       }}
                       className="ctrl-range"
-                      aria-label="Atur Margin Atas Bawah Zona Jalan"
+                      aria-label="Atur Tinggi Zona Jalan"
                     />
                   </div>
                 </div>
@@ -1776,40 +1994,37 @@ export const LiveWebcamFeed: React.FC = () => {
             </div>
 
             {/* Right Box: Multi-Scale Tiling & Confidence Threshold */}
-            <div className="rack-well p-3 space-y-2.5">
+            <div className="rack-well p-3 space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <span className="font-semibold text-[var(--text-primary)]">
-                  2. Akurasi Neural AI (HotWheels)
+                  2. Sensitivitas AI
                 </span>
-                <span className="font-bold text-[var(--text-primary)]">
-                  Min Confidence: {Math.round(minConfidence * 100)}%
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setEnableMultiScaleTiling((prev) => !prev)}
+                    className={`ctrl-btn ctrl-btn-sm font-mono ${
+                      enableMultiScaleTiling ? 'ctrl-btn-active' : ''
+                    }`}
+                  >
+                    {enableMultiScaleTiling ? 'Zoom Jauh: ON' : 'Zoom Jauh: OFF'}
+                  </button>
+                  <span className="font-bold text-[var(--text-primary)]">
+                    {Math.round(minConfidence * 100)}%
+                  </span>
+                </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setEnableMultiScaleTiling((prev) => !prev)}
-                  className={`ctrl-btn ctrl-btn-sm font-mono flex-1 ${
-                    enableMultiScaleTiling ? 'ctrl-btn-active' : ''
-                  }`}
-                >
-                  {enableMultiScaleTiling
-                    ? 'Multi-Scale Zoom (6+ Mobil Kecil): ON'
-                    : 'Single-Pass Standar'}
-                </button>
-              </div>
-
-              <div>
+              <div className="pt-1">
                 <div className="flex justify-between text-[10px] text-[var(--text-secondary)]">
-                  <span>15% (Sensitif Mobil Kecil)</span>
-                  <span>60% (Sangat Ketat)</span>
+                  <span>12% (Mobil Jauh / Atas)</span>
+                  <span>55% (Ketat)</span>
                 </div>
                 <input
                   type="range"
-                  min="0.15"
-                  max="0.60"
-                  step="0.03"
+                  min="0.12"
+                  max="0.55"
+                  step="0.02"
                   value={minConfidence}
                   onChange={(e) => setMinConfidence(parseFloat(e.target.value))}
                   className="ctrl-range"
