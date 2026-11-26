@@ -22,7 +22,7 @@ CAMERA_SOURCE = parse_camera_source(RAW_CAMERA_SOURCE)
 
 # Optimasi FPS & Latency (Downscaling Frame Input & YOLO Inference Resolution)
 INPUT_RESIZE_WIDTH = int(os.getenv("INPUT_RESIZE_WIDTH", "640"))
-YOLO_IMGSZ = int(os.getenv("YOLO_IMGSZ", "320")) # 320px membuat inferensi CPU 4x lebih cepat
+YOLO_IMGSZ = int(os.getenv("YOLO_IMGSZ", "640")) # 640px agar deretan 6+ mobil HotWheels kecil terdeteksi akurat oleh YOLO11
 
 # ==============================================================
 # 2. Konfigurasi YOLO11 Model & Filter Khusus Kendaraan (HotWheels / Diecast)

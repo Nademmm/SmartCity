@@ -106,19 +106,6 @@ class YOLODetector:
                         "confidence": float(confidence)
                     })
 
-        # ==============================================================
-        # 2. DETEKTOR KHUSUS MOBIL MINIATUR / HOTWHEELS
-        # Menangkap mobil HotWheels/miniatur yang sedang tampil di kamera
-        # ==============================================================
-        try:
-            lego_dets = self._detect_lego_and_miniatures(frame, detections)
-            for l_det in lego_dets:
-                total_vehicles += 1
-                counts["car"] += 1
-                detections.append(l_det)
-        except Exception as e:
-            logging.debug(f"Miniature detection heuristic warning: {e}")
-
         # Klasifikasi Status Kemacetan (Hanya dari mobil yang tampil di kamera saat ini):
         # 0 - 2 Mobil: LANCAR | 3 - 5 Mobil: PADAT | >= 6 Mobil: MACET TOTAL
         if total_vehicles <= 2:
