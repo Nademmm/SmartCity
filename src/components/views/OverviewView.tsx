@@ -13,7 +13,6 @@ export const OverviewView: React.FC = () => {
     controlGasManual,
     triggerCrossingDetection,
     resetCrossingToSafe,
-    updateUltrasonicDistances,
     controlPjuManual,
     setLdrValue,
     testBuzzerAlarm,
@@ -35,9 +34,6 @@ export const OverviewView: React.FC = () => {
 
   const isPjuOn = pju.pjuStatus === 'MENYALA';
   const ldrPct = Math.min(100, Math.round((pju.ldrValue / 4095) * 100));
-
-  const kananVal = crossing.jarakKanan ?? 40;
-  const kiriVal = crossing.jarakKiri ?? 40;
 
   return (
     <div className="space-y-4">
@@ -68,7 +64,14 @@ export const OverviewView: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setActiveSubsystem('diorama')}
+            className="ctrl-btn ctrl-btn-sm ctrl-btn-active font-mono"
+          >
+            Buka 3D Miniatur
+          </button>
           <button
             type="button"
             onClick={testBuzzerAlarm}
@@ -251,7 +254,7 @@ export const OverviewView: React.FC = () => {
         </section>
 
         {/* ============================================================
-            UNIT 02: PENYEBERANGAN DUAL ULTRASONIK & LAMPU
+            UNIT 02: PENYEBERANGAN SENSOR TOUCH & DUAL TRAFFIC LIGHT
         ============================================================ */}
         <section aria-label="Unit Penyeberangan Pejalan Kaki" className="rack-panel flex flex-col">
           {/* Header */}
@@ -261,9 +264,9 @@ export const OverviewView: React.FC = () => {
                 02
               </span>
               <h2 className="font-semibold text-sm text-[var(--text-primary)] truncate">
-                Penyeberangan Ultrasonik
+                Penyeberangan Sensor Touch
               </h2>
-              <span className="rack-tag hidden sm:inline-block">GPIO 12/14/27</span>
+              <span className="rack-tag hidden sm:inline-block">TOUCH 16/17 · DUAL TL</span>
             </div>
             <button
               type="button"
@@ -276,121 +279,132 @@ export const OverviewView: React.FC = () => {
 
           {/* Body */}
           <div className="p-4 flex-1 flex flex-col justify-between gap-4">
-            {/* Signal Housing & Active Phase */}
-            <div className="rack-well px-3.5 py-3 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                {/* Red LED (Pin 27) */}
-                <div
-                  className="w-10 h-10 rounded-full border-2 flex items-center justify-center font-mono text-xs font-bold transition-colors"
-                  style={{
-                    backgroundColor:
-                      crossing.lampu === 'MERAH' ? 'var(--sig-red-bg)' : 'var(--bg-panel)',
-                    borderColor:
-                      crossing.lampu === 'MERAH' ? 'var(--sig-red-dot)' : 'var(--border-strong)',
-                    color:
-                      crossing.lampu === 'MERAH' ? 'var(--sig-red)' : 'var(--text-secondary)',
-                  }}
-                >
-                  {crossing.lampu === 'MERAH' ? `${crossing.countdownSeconds}s` : 'M'}
+            {/* Dual Traffic Light Housing & Active Phase */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {/* TL Kendaraan */}
+              <div className="rack-well px-3 py-2.5 space-y-2">
+                <div className="flex items-center justify-between font-mono text-[10px] text-[var(--text-secondary)]">
+                  <span>TL KENDARAAN</span>
+                  <span>32/14/12</span>
                 </div>
-
-                {/* Yellow LED (Pin 14) */}
-                <div
-                  className="w-10 h-10 rounded-full border-2 flex items-center justify-center font-mono text-xs font-bold transition-colors"
-                  style={{
-                    backgroundColor:
-                      crossing.lampu === 'KUNING' ? 'var(--sig-amber-bg)' : 'var(--bg-panel)',
-                    borderColor:
-                      crossing.lampu === 'KUNING' ? 'var(--sig-amber-dot)' : 'var(--border-strong)',
-                    color:
-                      crossing.lampu === 'KUNING' ? 'var(--sig-amber)' : 'var(--text-secondary)',
-                  }}
-                >
-                  {crossing.lampu === 'KUNING' ? '1s' : 'K'}
-                </div>
-
-                {/* Green LED (Pin 12) */}
-                <div
-                  className="w-10 h-10 rounded-full border-2 flex items-center justify-center font-mono text-xs font-bold transition-colors"
-                  style={{
-                    backgroundColor:
-                      crossing.lampu === 'HIJAU' || crossing.lampu === 'TUNGGU_KOSONG'
-                        ? 'var(--sig-green-bg)'
-                        : 'var(--bg-panel)',
-                    borderColor:
-                      crossing.lampu === 'HIJAU' || crossing.lampu === 'TUNGGU_KOSONG'
-                        ? 'var(--sig-green-dot)'
-                        : 'var(--border-strong)',
-                    color:
-                      crossing.lampu === 'HIJAU' || crossing.lampu === 'TUNGGU_KOSONG'
-                        ? 'var(--sig-green)'
-                        : 'var(--text-secondary)',
-                  }}
-                >
-                  H
+                <div className="flex items-center gap-2">
+                  <div
+                    className="w-8 h-8 rounded-full border-2 flex items-center justify-center font-mono text-[11px] font-bold"
+                    style={{
+                      backgroundColor:
+                        crossing.lampuKendaraan === 'MERAH' ? 'var(--sig-red-bg)' : 'var(--bg-panel)',
+                      borderColor:
+                        crossing.lampuKendaraan === 'MERAH' ? 'var(--sig-red-dot)' : 'var(--border-strong)',
+                      color:
+                        crossing.lampuKendaraan === 'MERAH' ? 'var(--sig-red)' : 'var(--text-secondary)',
+                    }}
+                  >
+                    M
+                  </div>
+                  <div
+                    className="w-8 h-8 rounded-full border-2 flex items-center justify-center font-mono text-[11px] font-bold"
+                    style={{
+                      backgroundColor:
+                        crossing.lampuKendaraan === 'KUNING' ? 'var(--sig-amber-bg)' : 'var(--bg-panel)',
+                      borderColor:
+                        crossing.lampuKendaraan === 'KUNING' ? 'var(--sig-amber-dot)' : 'var(--border-strong)',
+                      color:
+                        crossing.lampuKendaraan === 'KUNING' ? 'var(--sig-amber)' : 'var(--text-secondary)',
+                    }}
+                  >
+                    {crossing.lampu === 'KUNING_KENDARAAN' ? `${crossing.countdownSeconds}s` : 'K'}
+                  </div>
+                  <div
+                    className="w-8 h-8 rounded-full border-2 flex items-center justify-center font-mono text-[11px] font-bold"
+                    style={{
+                      backgroundColor:
+                        crossing.lampuKendaraan === 'HIJAU' ? 'var(--sig-green-bg)' : 'var(--bg-panel)',
+                      borderColor:
+                        crossing.lampuKendaraan === 'HIJAU' ? 'var(--sig-green-dot)' : 'var(--border-strong)',
+                      color:
+                        crossing.lampuKendaraan === 'HIJAU' ? 'var(--sig-green)' : 'var(--text-secondary)',
+                    }}
+                  >
+                    H
+                  </div>
                 </div>
               </div>
 
-              <div className="text-right font-mono">
-                <span className="text-[10px] text-[var(--text-secondary)] block">
-                  FASE AKTIF
-                </span>
-                <span className="text-sm font-bold text-[var(--text-primary)]">
-                  {crossing.lampu}
-                </span>
+              {/* TL Pejalan Kaki */}
+              <div className="rack-well px-3 py-2.5 space-y-2">
+                <div className="flex items-center justify-between font-mono text-[10px] text-[var(--text-secondary)]">
+                  <span>TL PEJALAN KAKI</span>
+                  <span>27/33/23</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div
+                    className="w-8 h-8 rounded-full border-2 flex items-center justify-center font-mono text-[11px] font-bold"
+                    style={{
+                      backgroundColor:
+                        crossing.lampuPejalan === 'MERAH' ? 'var(--sig-red-bg)' : 'var(--bg-panel)',
+                      borderColor:
+                        crossing.lampuPejalan === 'MERAH' ? 'var(--sig-red-dot)' : 'var(--border-strong)',
+                      color:
+                        crossing.lampuPejalan === 'MERAH' ? 'var(--sig-red)' : 'var(--text-secondary)',
+                    }}
+                  >
+                    M
+                  </div>
+                  <div
+                    className="w-8 h-8 rounded-full border-2 flex items-center justify-center font-mono text-[11px] font-bold"
+                    style={{
+                      backgroundColor:
+                        crossing.lampuPejalan === 'KUNING' ? 'var(--sig-amber-bg)' : 'var(--bg-panel)',
+                      borderColor:
+                        crossing.lampuPejalan === 'KUNING' ? 'var(--sig-amber-dot)' : 'var(--border-strong)',
+                      color:
+                        crossing.lampuPejalan === 'KUNING' ? 'var(--sig-amber)' : 'var(--text-secondary)',
+                    }}
+                  >
+                    {crossing.lampuPejalan === 'KUNING' ? `${crossing.countdownSeconds}s` : 'K'}
+                  </div>
+                  <div
+                    className="w-8 h-8 rounded-full border-2 flex items-center justify-center font-mono text-[11px] font-bold"
+                    style={{
+                      backgroundColor:
+                        crossing.lampuPejalan === 'HIJAU' ? 'var(--sig-green-bg)' : 'var(--bg-panel)',
+                      borderColor:
+                        crossing.lampuPejalan === 'HIJAU' ? 'var(--sig-green-dot)' : 'var(--border-strong)',
+                      color:
+                        crossing.lampuPejalan === 'HIJAU' ? 'var(--sig-green)' : 'var(--text-secondary)',
+                    }}
+                  >
+                    {crossing.lampu === 'MENYEBRANG' ? `${crossing.countdownSeconds}s` : 'H'}
+                  </div>
+                </div>
               </div>
             </div>
 
-            {/* Dual Ultrasonic Sliders */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="rack-well p-3 space-y-1.5">
-                <div className="flex items-center justify-between text-xs font-mono">
-                  <span className="text-[var(--text-secondary)]">Kanan (&lt;=17cm)</span>
-                  <span
-                    className="font-bold"
-                    style={{
-                      color: crossing.orangKanan ? 'var(--sig-red)' : 'var(--sig-green)',
-                    }}
-                  >
-                    {crossing.jarakKanan !== null ? `${crossing.jarakKanan.toFixed(1)} cm` : 'NULL'}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="2"
-                  max="60"
-                  value={kananVal}
-                  onChange={(e) =>
-                    updateUltrasonicDistances(Number(e.target.value), crossing.jarakKiri)
-                  }
-                  className="ctrl-range"
-                  aria-label="Jarak Ultrasonik Kanan"
-                />
+            {/* Dual Sensor Touch Status & Phase Readout */}
+            <div className="grid grid-cols-3 gap-2">
+              <div className="rack-well p-2.5 font-mono">
+                <span className="text-[10px] text-[var(--text-secondary)] block">TOUCH KANAN</span>
+                <span
+                  className="text-xs font-bold mt-0.5 block truncate"
+                  style={{ color: crossing.touchKanan ? 'var(--sig-amber)' : 'var(--sig-green)' }}
+                >
+                  {crossing.touchKanan ? 'DISENTUH' : 'SIAGA (17)'}
+                </span>
               </div>
-
-              <div className="rack-well p-3 space-y-1.5">
-                <div className="flex items-center justify-between text-xs font-mono">
-                  <span className="text-[var(--text-secondary)]">Kiri (&lt;=25cm)</span>
-                  <span
-                    className="font-bold"
-                    style={{
-                      color: crossing.orangKiri ? 'var(--sig-red)' : 'var(--sig-green)',
-                    }}
-                  >
-                    {crossing.jarakKiri !== null ? `${crossing.jarakKiri.toFixed(1)} cm` : 'NULL'}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="2"
-                  max="60"
-                  value={kiriVal}
-                  onChange={(e) =>
-                    updateUltrasonicDistances(crossing.jarakKanan, Number(e.target.value))
-                  }
-                  className="ctrl-range"
-                  aria-label="Jarak Ultrasonik Kiri"
-                />
+              <div className="rack-well p-2.5 font-mono">
+                <span className="text-[10px] text-[var(--text-secondary)] block">TOUCH KIRI</span>
+                <span
+                  className="text-xs font-bold mt-0.5 block truncate"
+                  style={{ color: crossing.touchKiri ? 'var(--sig-amber)' : 'var(--sig-green)' }}
+                >
+                  {crossing.touchKiri ? 'DISENTUH' : 'SIAGA (16)'}
+                </span>
+              </div>
+              <div className="rack-well p-2.5 font-mono">
+                <span className="text-[10px] text-[var(--text-secondary)] block">FASE AKTIF</span>
+                <span className="text-xs font-bold mt-0.5 block truncate text-[var(--text-primary)]">
+                  {crossing.lampu}
+                </span>
               </div>
             </div>
 
@@ -401,28 +415,28 @@ export const OverviewView: React.FC = () => {
                 onClick={() => triggerCrossingDetection('force')}
                 className="ctrl-btn ctrl-btn-red font-mono"
               >
-                Paksa Merah
+                Seberang
               </button>
               <button
                 type="button"
                 onClick={() => triggerCrossingDetection('kanan')}
                 className="ctrl-btn font-mono"
               >
-                Kanan 12cm
+                Touch 17
               </button>
               <button
                 type="button"
                 onClick={() => triggerCrossingDetection('kiri')}
                 className="ctrl-btn font-mono"
               >
-                Kiri 18cm
+                Touch 16
               </button>
               <button
                 type="button"
                 onClick={resetCrossingToSafe}
                 className="ctrl-btn ctrl-btn-green font-mono"
               >
-                Reset Hijau
+                Normal
               </button>
             </div>
           </div>

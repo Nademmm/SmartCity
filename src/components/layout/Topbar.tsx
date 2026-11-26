@@ -6,8 +6,9 @@ import { SubsystemType } from '@/types/iot';
 
 const NAV_MODULES: { id: SubsystemType; label: string; shortLabel: string; code: string }[] = [
   { id: 'overview', label: 'Semua Modul', shortLabel: 'Semua', code: 'ALL' },
+  { id: 'diorama', label: '3D Miniatur', shortLabel: '3D', code: '3D' },
   { id: 'air-quality', label: 'Polusi & LCD', shortLabel: 'Gas', code: 'MQ' },
-  { id: 'pedestrian', label: 'Penyeberangan', shortLabel: 'Zebra', code: 'US' },
+  { id: 'pedestrian', label: 'Penyeberangan', shortLabel: 'Touch', code: 'TCH' },
   { id: 'lighting', label: 'Smart PJU', shortLabel: 'PJU', code: 'LDR' },
   { id: 'traffic', label: 'Kamera Simpang', shortLabel: 'Kamera', code: 'CAM' },
   { id: 'alerts', label: 'Serial & Log', shortLabel: 'Serial', code: 'COM' },
@@ -192,10 +193,10 @@ export const Topbar: React.FC = () => {
         </div>
       </header>
 
-      {/* Mobile Bottom Dock (Proportional 6-column Segmented Bar) */}
+      {/* Mobile Bottom Dock (Proportional 7-column Segmented Bar) */}
       <nav
         aria-label="Navigasi Modul Mobile"
-        className="lg:hidden fixed bottom-0 left-0 right-0 z-30 w-full max-w-[100vw] bg-[var(--bg-panel)] border-t border-[var(--border-line)] px-1.5 py-1.5 grid grid-cols-6 gap-1"
+        className="lg:hidden fixed bottom-0 left-0 right-0 z-30 w-full max-w-[100vw] bg-[var(--bg-panel)] border-t border-[var(--border-line)] px-1 py-1.5 grid grid-cols-7 gap-0.5"
       >
         {NAV_MODULES.map((item) => {
           const isActive = activeSubsystem === item.id;

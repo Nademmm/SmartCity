@@ -5,6 +5,7 @@ import { SmartCityProvider, useSmartCity } from '@/context/SmartCityContext';
 import { Topbar } from '@/components/layout/Topbar';
 
 import { OverviewView } from '@/components/views/OverviewView';
+import { Diorama3DView } from '@/components/views/Diorama3DView';
 import { TrafficView } from '@/components/views/TrafficView';
 import { LightingView } from '@/components/views/LightingView';
 import { PedestrianView } from '@/components/views/PedestrianView';
@@ -19,6 +20,8 @@ const DashboardContent: React.FC = () => {
     switch (activeSubsystem) {
       case 'overview':
         return <OverviewView />;
+      case 'diorama':
+        return <Diorama3DView />;
       case 'air-quality':
         return <AirQualityView />;
       case 'pedestrian':

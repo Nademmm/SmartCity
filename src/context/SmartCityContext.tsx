@@ -13,6 +13,7 @@ import {
   SystemEventLog,
   BuzzerMode,
   CrossingPhase,
+  SignalLampState,
 } from '@/types/iot';
 import {
   INITIAL_TRAFFIC,
@@ -32,6 +33,68 @@ function formatLcdLine1(gasVal: number): string {
 
 function formatLcdLine2(status: string): string {
   return status.slice(0, 16).padEnd(16, ' ');
+}
+
+function normalizeCrossingPhase(raw: unknown): CrossingPhase {
+  const val = String(raw || '').toUpperCase().trim();
+  if (
+    val === 'NORMAL' ||
+    val === 'KUNING_KENDARAAN' ||
+    val === 'KUNING_PEJALAN' ||
+    val === 'MENYEBRANG' ||
+    val === 'KUNING_PENUTUP'
+  ) {
+    return val;
+  }
+  if (val === 'KUNING') return 'KUNING_KENDARAAN';
+  if (val === 'MERAH') return 'MENYEBRANG';
+  return 'NORMAL';
+}
+
+function deriveCrossingVisuals(phase: CrossingPhase): {
+  lampuKendaraan: SignalLampState;
+  lampuPejalan: SignalLampState;
+  statusRingkasan: SmartCrossingData['statusRingkasan'];
+  defaultDuration: number;
+} {
+  switch (phase) {
+    case 'KUNING_KENDARAAN':
+      return {
+        lampuKendaraan: 'KUNING',
+        lampuPejalan: 'MERAH',
+        statusRingkasan: 'KENDARAAN BERSIAP',
+        defaultDuration: 3,
+      };
+    case 'KUNING_PEJALAN':
+      return {
+        lampuKendaraan: 'MERAH',
+        lampuPejalan: 'KUNING',
+        statusRingkasan: 'PEJALAN BERSIAP',
+        defaultDuration: 2,
+      };
+    case 'MENYEBRANG':
+      return {
+        lampuKendaraan: 'MERAH',
+        lampuPejalan: 'HIJAU',
+        statusRingkasan: 'SILAKAN MENYEBRANG',
+        defaultDuration: 10,
+      };
+    case 'KUNING_PENUTUP':
+      return {
+        lampuKendaraan: 'MERAH',
+        lampuPejalan: 'KUNING',
+        statusRingkasan: 'WAKTU HABIS',
+        defaultDuration: 2,
+      };
+    case 'NORMAL':
+    default:
+      return {
+        lampuKendaraan: 'HIJAU',
+        lampuPejalan: 'MERAH',
+        statusRingkasan: 'NORMAL',
+        defaultDuration: 0,
+      };
+  }
 }
 
 interface SmartCityContextType {
@@ -84,9 +147,8 @@ interface SmartCityContextType {
   setLdrValue: (value: number) => void;
   togglePjuDayNight: () => void;
 
-  triggerCrossingDetection: (side: 'kanan' | 'kiri' | 'kedua' | 'force') => void;
+  triggerCrossingDetection: (source: 'kanan' | 'kiri' | 'force') => void;
   resetCrossingToSafe: () => void;
-  updateUltrasonicDistances: (kanan: number | null, kiri: number | null) => void;
 
   controlGasManual: (mode: 'AUTO' | 'BERSIH' | 'SEDANG' | 'BAHAYA' | number) => void;
   setGasSensorValue: (value: number) => void;
@@ -147,17 +209,13 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   const lastPjuCmdTimeRef = useRef<number>(0);
   const lastCrossingCmdTimeRef = useRef<number>(0);
 
-  // Track processed telemetry packet timestamps so we never re-apply stale packets
+  // Track processed telemetry packet timestamps
   const lastTrafficTsRef = useRef<string>('');
   const lastPjuTsRef = useRef<string>('');
   const lastPedTsRef = useRef<string>('');
   const lastGasTsRef = useRef<string>('');
 
-  // Crossing state refs to avoid slider race conditions
-  const crossingBusyRef = useRef<boolean>(false);
-  const kananReadyRef = useRef<boolean>(true);
-  const kiriReadyRef = useRef<boolean>(true);
-  const crossingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const touchPulseTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && 'serial' in navigator) {
@@ -325,42 +383,41 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
         }
       }
 
-      // 2. Update Penyeberangan Ultrasonik
-      if (parsed.lampu !== undefined) {
-        const jKanan = parsed.jarakKanan !== undefined ? parsed.jarakKanan : null;
-        const jKiri = parsed.jarakKiri !== undefined ? parsed.jarakKiri : null;
-        const oKanan = Boolean(parsed.orangKanan ?? (jKanan !== null && jKanan > 0 && jKanan <= 17));
-        const oKiri = Boolean(parsed.orangKiri ?? (jKiri !== null && jKiri > 0 && jKiri <= 25));
-        const lampu: CrossingPhase = parsed.lampu || 'HIJAU';
+      // 2. Update Penyeberangan Sensor Touch + Dual Traffic Light
+      if (parsed.lampu !== undefined || parsed.touchKanan !== undefined || parsed.touchKiri !== undefined) {
+        const touchKanan = Boolean(parsed.touchKanan ?? parsed.orangKanan ?? false);
+        const touchKiri = Boolean(parsed.touchKiri ?? parsed.orangKiri ?? false);
+        const lampu = normalizeCrossingPhase(parsed.lampu);
+        const visuals = deriveCrossingVisuals(lampu);
+        const isCrossingBuzzer =
+          parsed.buzzerSeberang !== undefined ? Boolean(parsed.buzzerSeberang) : lampu === 'MENYEBRANG';
 
-        crossingBusyRef.current = lampu === 'KUNING' || lampu === 'MERAH';
-        if (!oKanan) kananReadyRef.current = true;
-        if (!oKiri) kiriReadyRef.current = true;
-
-        let statusRingkasan: SmartCrossingData['statusRingkasan'] = 'AMAN';
-        if (lampu === 'MERAH') statusRingkasan = 'ORANG MENYEBRANG';
-        else if (lampu === 'TUNGGU_KOSONG') statusRingkasan = 'MENUNGGU KOSONG';
-        else if (lampu === 'KUNING' || oKanan || oKiri) statusRingkasan = 'ORANG TERDETEKSI';
-
-        setCrossing((prev) => ({
-          ...prev,
-          jarakKanan: jKanan,
-          jarakKiri: jKiri,
-          orangKanan: oKanan,
-          orangKiri: oKiri,
-          siapMenyeberang: lampu === 'HIJAU',
-          lampu,
-          buzzer: lampu === 'MERAH',
-          countdownSeconds:
+        setCrossing((prev) => {
+          const nextCountdown =
             parsed.countdown !== undefined
               ? Number(parsed.countdown)
-              : lampu === 'MERAH'
-              ? prev.countdownSeconds || 5
-              : lampu === 'KUNING'
-              ? 1
-              : 0,
-          statusRingkasan,
-        }));
+              : lampu !== prev.lampu
+              ? visuals.defaultDuration
+              : prev.countdownSeconds;
+
+          return {
+            ...prev,
+            touchKanan,
+            touchKiri,
+            siapMenyeberang: lampu === 'NORMAL',
+            lampu,
+            lampuKendaraan: visuals.lampuKendaraan,
+            lampuPejalan: visuals.lampuPejalan,
+            buzzer: isCrossingBuzzer,
+            countdownSeconds: lampu === 'NORMAL' ? 0 : nextCountdown,
+            statusRingkasan: visuals.statusRingkasan,
+            sumberTerakhir: touchKanan
+              ? 'TOUCH KANAN (PIN 17)'
+              : touchKiri
+              ? 'TOUCH KIRI (PIN 16)'
+              : prev.sumberTerakhir,
+          };
+        });
       }
 
       // 3. Update Smart PJU
@@ -391,7 +448,7 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
     [alarmSnoozeUntil]
   );
 
-  // Parsing baris teks biasa dari Thonny/ESP32 (jika script tanpa [JSON] atau saat sedang countdown)
+  // Parsing baris teks biasa dari Thonny/ESP32
   const applyIncomingPlainLine = useCallback((line: string) => {
     const nowTime = new Date().toLocaleTimeString('id-ID', { hour12: false });
     setIsHardwareConnected(true);
@@ -413,96 +470,118 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
 
-    const kananMatch = line.match(/^Jarak kanan:\s*([\d.]+)/i);
-    if (kananMatch) {
-      const jk = parseFloat(kananMatch[1]);
-      const ok = jk > 0 && jk <= 17;
-      setCrossing((prev) => ({
-        ...prev,
-        jarakKanan: jk,
-        orangKanan: ok,
-      }));
-      return;
-    }
-    if (/^Jarak kanan:\s*tidak terbaca/i.test(line)) {
-      setCrossing((prev) => ({
-        ...prev,
-        jarakKanan: null,
-        orangKanan: false,
-      }));
+    const touchKananMatch = line.match(/^Touch kanan:\s*(True|False)/i);
+    if (touchKananMatch) {
+      const active = touchKananMatch[1].toLowerCase() === 'true';
+      setCrossing((prev) => ({ ...prev, touchKanan: active }));
       return;
     }
 
-    const kiriMatch = line.match(/^Jarak kiri:\s*([\d.]+)/i);
-    if (kiriMatch) {
-      const jkr = parseFloat(kiriMatch[1]);
-      const okr = jkr > 0 && jkr <= 25;
-      setCrossing((prev) => ({
-        ...prev,
-        jarakKiri: jkr,
-        orangKiri: okr,
-      }));
-      return;
-    }
-    if (/^Jarak kiri:\s*tidak terbaca/i.test(line)) {
-      setCrossing((prev) => ({
-        ...prev,
-        jarakKiri: null,
-        orangKiri: false,
-      }));
+    const touchKiriMatch = line.match(/^Touch kiri:\s*(True|False)/i);
+    if (touchKiriMatch) {
+      const active = touchKiriMatch[1].toLowerCase() === 'true';
+      setCrossing((prev) => ({ ...prev, touchKiri: active }));
       return;
     }
 
-    if (line.includes('>>> LAMPU KUNING')) {
-      crossingBusyRef.current = true;
+    if (line.includes('>>> TOUCH KANAN TERDETEKSI')) {
+      setCrossing((prev) => ({ ...prev, touchKanan: true, sumberTerakhir: 'TOUCH KANAN (PIN 17)' }));
+      return;
+    }
+
+    if (line.includes('>>> TOUCH KIRI TERDETEKSI')) {
+      setCrossing((prev) => ({ ...prev, touchKiri: true, sumberTerakhir: 'TOUCH KIRI (PIN 16)' }));
+      return;
+    }
+
+    if (line.includes('PERMINTAAN PENYEBERANGAN DITERIMA')) {
+      const v = deriveCrossingVisuals('KUNING_KENDARAAN');
       setCrossing((prev) => ({
         ...prev,
-        lampu: 'KUNING',
+        lampu: 'KUNING_KENDARAAN',
+        lampuKendaraan: v.lampuKendaraan,
+        lampuPejalan: v.lampuPejalan,
         siapMenyeberang: false,
         buzzer: false,
-        countdownSeconds: 1,
-        statusRingkasan: 'ORANG TERDETEKSI',
+        countdownSeconds: v.defaultDuration,
+        statusRingkasan: v.statusRingkasan,
       }));
       return;
     }
 
-    if (line.includes('>>> LAMPU MERAH')) {
-      crossingBusyRef.current = true;
+    if (line.includes('KENDARAAN MERAH, PEJALAN KAKI KUNING')) {
+      const v = deriveCrossingVisuals('KUNING_PEJALAN');
       setCrossing((prev) => ({
         ...prev,
-        lampu: 'MERAH',
+        lampu: 'KUNING_PEJALAN',
+        lampuKendaraan: v.lampuKendaraan,
+        lampuPejalan: v.lampuPejalan,
+        siapMenyeberang: false,
+        buzzer: false,
+        countdownSeconds: v.defaultDuration,
+        statusRingkasan: v.statusRingkasan,
+      }));
+      return;
+    }
+
+    if (line.includes('PEJALAN KAKI HIJAU')) {
+      const v = deriveCrossingVisuals('MENYEBRANG');
+      setCrossing((prev) => ({
+        ...prev,
+        lampu: 'MENYEBRANG',
+        lampuKendaraan: v.lampuKendaraan,
+        lampuPejalan: v.lampuPejalan,
         siapMenyeberang: false,
         buzzer: true,
-        countdownSeconds: 5,
-        statusRingkasan: 'ORANG MENYEBRANG',
+        countdownSeconds: v.defaultDuration,
+        statusRingkasan: v.statusRingkasan,
       }));
       return;
     }
 
-    const sisaMatch = line.match(/^Sisa waktu:\s*(\d+)/i);
-    if (sisaMatch) {
-      const sec = parseInt(sisaMatch[1], 10);
-      crossingBusyRef.current = true;
+    if (line.includes('WAKTU MENYEBRANG SELESAI')) {
+      const v = deriveCrossingVisuals('KUNING_PENUTUP');
       setCrossing((prev) => ({
         ...prev,
-        lampu: 'MERAH',
+        lampu: 'KUNING_PENUTUP',
+        lampuKendaraan: v.lampuKendaraan,
+        lampuPejalan: v.lampuPejalan,
         siapMenyeberang: false,
-        buzzer: true,
-        countdownSeconds: sec,
-        statusRingkasan: 'ORANG MENYEBRANG',
+        buzzer: false,
+        countdownSeconds: v.defaultDuration,
+        statusRingkasan: v.statusRingkasan,
       }));
       return;
     }
 
-    if (line.includes('>>> SELESAI - LAMPU HIJAU') || line.includes('>>> AREA KOSONG')) {
-      crossingBusyRef.current = false;
+    if (line.includes('KEMBALI KE KONDISI NORMAL') || line.includes('DIRESET KE NORMAL')) {
+      const v = deriveCrossingVisuals('NORMAL');
       setCrossing((prev) => ({
         ...prev,
-        lampu: 'HIJAU',
+        lampu: 'NORMAL',
+        lampuKendaraan: v.lampuKendaraan,
+        lampuPejalan: v.lampuPejalan,
         siapMenyeberang: true,
         buzzer: false,
         countdownSeconds: 0,
-        statusRingkasan: 'AMAN',
+        statusRingkasan: v.statusRingkasan,
+      }));
+      return;
+    }
+
+    const faseMatch = line.match(/^Fase traffic light:\s*(\S+)/i);
+    if (faseMatch) {
+      const phase = normalizeCrossingPhase(faseMatch[1]);
+      const v = deriveCrossingVisuals(phase);
+      setCrossing((prev) => ({
+        ...prev,
+        lampu: phase,
+        lampuKendaraan: v.lampuKendaraan,
+        lampuPejalan: v.lampuPejalan,
+        siapMenyeberang: phase === 'NORMAL',
+        buzzer: phase === 'MENYEBRANG',
+        countdownSeconds: phase !== prev.lampu ? v.defaultDuration : prev.countdownSeconds,
+        statusRingkasan: v.statusRingkasan,
       }));
       return;
     }
@@ -512,7 +591,14 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
       const ldrVal = parseInt(ldrMatch[1], 10);
       setPju((prev) => {
         const isDark = ldrVal > prev.thresholdLdr;
-        const kondisi = prev.pjuMode === 'ON' ? 'MANUAL_ON' : prev.pjuMode === 'OFF' ? 'MANUAL_OFF' : isDark ? 'GELAP' : 'TERANG';
+        const kondisi =
+          prev.pjuMode === 'ON'
+            ? 'MANUAL_ON'
+            : prev.pjuMode === 'OFF'
+            ? 'MANUAL_OFF'
+            : isDark
+            ? 'GELAP'
+            : 'TERANG';
         const pjuStatus = kondisi === 'MANUAL_ON' || kondisi === 'GELAP' ? 'MENYALA' : 'MATI';
         const ledsOn = pjuStatus === 'MENYALA';
         return {
@@ -581,9 +667,12 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
                 applyIncomingEspJson(parsed);
 
                 const nowMs = Date.now();
-                if (nowMs - lastSerialCloudSyncRef.current >= 500) {
+                if (nowMs - lastSerialCloudSyncRef.current >= 450) {
                   lastSerialCloudSyncRef.current = nowMs;
                   const isPjuOn = parsed.pjuStatus === 'MENYALA';
+                  const phase = normalizeCrossingPhase(parsed.lampu);
+                  const visuals = deriveCrossingVisuals(phase);
+
                   fetch('/api/iot/telemetry', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -597,14 +686,13 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
                           statusPolusi: parsed.statusPolusi,
                         },
                         crossing: {
-                          jarakKanan: parsed.jarakKanan,
-                          jarakKiri: parsed.jarakKiri,
-                          orangKanan: parsed.orangKanan,
-                          orangKiri: parsed.orangKiri,
-                          lampu: parsed.lampu,
-                          countdown: parsed.countdown ?? 0,
-                          buzzer: parsed.lampu === 'MERAH',
-                          siapMenyeberang: parsed.lampu === 'HIJAU',
+                          touchKanan: Boolean(parsed.touchKanan ?? parsed.orangKanan ?? false),
+                          touchKiri: Boolean(parsed.touchKiri ?? parsed.orangKiri ?? false),
+                          lampu: phase,
+                          countdown: parsed.countdown ?? visuals.defaultDuration,
+                          buzzer: parsed.buzzerSeberang ?? phase === 'MENYEBRANG',
+                          siapMenyeberang: phase === 'NORMAL',
+                          statusRingkasan: visuals.statusRingkasan,
                         },
                         pju: {
                           ldrValue: parsed.ldr,
@@ -768,150 +856,101 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   }, [controlPjuManual]);
 
   // ==========================================================
-  // FITUR 2 & 3: SMART PENYEBERANGAN (HIJAU -> KUNING 1s -> MERAH 5s -> HIJAU)
+  // FITUR 2 & 3: SMART PENYEBERANGAN SENSOR TOUCH + DUAL TRAFFIC LIGHT
+  // Urutan: NORMAL -> KUNING_KENDARAAN (3s) -> KUNING_PEJALAN (2s)
+  //         -> MENYEBRANG (10s) -> KUNING_PENUTUP (2s) -> NORMAL
   // ==========================================================
-  const startCrossingSequence = useCallback(
-    (jKanan: number | null, jKiri: number | null, label: string, sendHwCommand: boolean) => {
-      if (crossingTimerRef.current) {
-        clearTimeout(crossingTimerRef.current);
-      }
-
-      crossingBusyRef.current = true;
+  const triggerCrossingDetection = useCallback(
+    (source: 'kanan' | 'kiri' | 'force') => {
+      sounds.playSuccess();
       lastCrossingCmdTimeRef.current = Date.now();
-      const oKanan = jKanan !== null && jKanan > 0 && jKanan <= 17;
-      const oKiri = jKiri !== null && jKiri > 0 && jKiri <= 25;
 
-      if (oKanan) kananReadyRef.current = false;
-      if (oKiri) kiriReadyRef.current = false;
+      const cmd =
+        source === 'kanan'
+          ? 'CMD:TOUCH_KANAN'
+          : source === 'kiri'
+          ? 'CMD:TOUCH_KIRI'
+          : 'CMD:FORCE_CROSSING';
+      const label =
+        source === 'kanan'
+          ? 'TOUCH KANAN (PIN 17)'
+          : source === 'kiri'
+          ? 'TOUCH KIRI (PIN 16)'
+          : 'WEB DASHBOARD';
 
-      if (sendHwCommand) {
-        sendCommand('CMD:FORCE_CROSSING');
+      sendCommand(cmd);
+
+      const v = deriveCrossingVisuals('KUNING_KENDARAAN');
+      setCrossing((prev) => {
+        if (prev.lampu !== 'NORMAL') {
+          return {
+            ...prev,
+            touchKanan: source === 'kanan' ? true : prev.touchKanan,
+            touchKiri: source === 'kiri' ? true : prev.touchKiri,
+          };
+        }
+        return {
+          ...prev,
+          touchKanan: source === 'kanan',
+          touchKiri: source === 'kiri',
+          siapMenyeberang: false,
+          lampu: 'KUNING_KENDARAAN',
+          lampuKendaraan: v.lampuKendaraan,
+          lampuPejalan: v.lampuPejalan,
+          buzzer: false,
+          countdownSeconds: v.defaultDuration,
+          statusRingkasan: v.statusRingkasan,
+          sumberTerakhir: label,
+        };
+      });
+
+      if (source === 'kanan' || source === 'kiri') {
+        if (touchPulseTimerRef.current) clearTimeout(touchPulseTimerRef.current);
+        touchPulseTimerRef.current = setTimeout(() => {
+          setCrossing((prev) => ({
+            ...prev,
+            touchKanan: false,
+            touchKiri: false,
+          }));
+        }, 700);
       }
-
-      setCrossing((prev) => ({
-        ...prev,
-        jarakKanan: jKanan,
-        jarakKiri: jKiri,
-        orangKanan: oKanan,
-        orangKiri: oKiri,
-        siapMenyeberang: false,
-        lampu: 'KUNING',
-        buzzer: false,
-        countdownSeconds: 1,
-        statusRingkasan: 'ORANG TERDETEKSI',
-      }));
 
       addEventLog(
-        'Penyeberangan',
-        label,
-        `Fase KUNING (1 detik) -> MERAH (5 detik). Kanan: ${jKanan ?? '-'}cm, Kiri: ${jKiri ?? '-'}cm`,
+        'Penyeberangan Touch',
+        cmd,
+        `Pemicu: ${label}. Urutan: Kuning Kendaraan (3s) -> Kuning Pejalan (2s) -> Menyebrang (10s) -> Kuning Penutup (2s)`,
         'MANUAL'
       );
-
-      crossingTimerRef.current = setTimeout(() => {
-        setCrossing((prev) => ({
-          ...prev,
-          lampu: 'MERAH',
-          buzzer: true,
-          countdownSeconds: 5,
-          statusRingkasan: 'ORANG MENYEBRANG',
-        }));
-      }, 1000);
     },
     [sendCommand, addEventLog]
   );
 
-  const triggerCrossingDetection = useCallback(
-    (side: 'kanan' | 'kiri' | 'kedua' | 'force') => {
-      sounds.playSuccess();
-      const jarakKanan = side === 'kiri' ? 35 : side === 'force' ? 12 : 12;
-      const jarakKiri = side === 'kanan' ? 42 : side === 'force' ? 18 : 18;
-      startCrossingSequence(jarakKanan, jarakKiri, `CMD:FORCE_CROSSING (${side.toUpperCase()})`, true);
-    },
-    [startCrossingSequence]
-  );
-
   const resetCrossingToSafe = useCallback(() => {
-    if (crossingTimerRef.current) {
-      clearTimeout(crossingTimerRef.current);
-    }
+    if (touchPulseTimerRef.current) clearTimeout(touchPulseTimerRef.current);
     sounds.playClick();
-    crossingBusyRef.current = false;
-    kananReadyRef.current = true;
-    kiriReadyRef.current = true;
     lastCrossingCmdTimeRef.current = Date.now();
     sendCommand('CMD:CROSSING_RESET');
+
+    const v = deriveCrossingVisuals('NORMAL');
     setCrossing((prev) => ({
       ...prev,
-      jarakKanan: 35.0,
-      jarakKiri: 42.0,
-      orangKanan: false,
-      orangKiri: false,
+      touchKanan: false,
+      touchKiri: false,
       siapMenyeberang: true,
-      lampu: 'HIJAU',
+      lampu: 'NORMAL',
+      lampuKendaraan: v.lampuKendaraan,
+      lampuPejalan: v.lampuPejalan,
       buzzer: false,
       countdownSeconds: 0,
-      statusRingkasan: 'AMAN',
+      statusRingkasan: v.statusRingkasan,
     }));
-    addEventLog('Penyeberangan', 'Reset ke HIJAU', 'Area kosong (Kanan 35cm, Kiri 42cm), siap mendeteksi ulang', 'MANUAL');
+    addEventLog(
+      'Penyeberangan Touch',
+      'CMD:CROSSING_RESET',
+      'Reset ke NORMAL (Kendaraan Hijau Pin 12, Pejalan Merah Pin 27)',
+      'MANUAL'
+    );
   }, [sendCommand, addEventLog]);
-
-  const updateUltrasonicDistances = useCallback(
-    (kanan: number | null, kiri: number | null) => {
-      lastCrossingCmdTimeRef.current = Date.now();
-      const orangKanan = kanan !== null && kanan > 0 && kanan <= 17;
-      const orangKiri = kiri !== null && kiri > 0 && kiri <= 25;
-      const adaOrang = orangKanan || orangKiri;
-
-      if (!orangKanan) kananReadyRef.current = true;
-      if (!orangKiri) kiriReadyRef.current = true;
-
-      const pemicuBaru =
-        (orangKanan && kananReadyRef.current) || (orangKiri && kiriReadyRef.current);
-
-      if (!crossingBusyRef.current && pemicuBaru) {
-        startCrossingSequence(kanan, kiri, 'Deteksi Ultrasonik', true);
-        return;
-      }
-
-      setCrossing((prev) => {
-        if (!adaOrang && prev.lampu === 'TUNGGU_KOSONG') {
-          crossingBusyRef.current = false;
-          return {
-            ...prev,
-            jarakKanan: kanan,
-            jarakKiri: kiri,
-            orangKanan: false,
-            orangKiri: false,
-            siapMenyeberang: true,
-            lampu: 'HIJAU',
-            buzzer: false,
-            countdownSeconds: 0,
-            statusRingkasan: 'AMAN',
-          };
-        }
-
-        let statusRingkasan: SmartCrossingData['statusRingkasan'] = 'AMAN';
-        if (prev.lampu === 'MERAH') {
-          statusRingkasan = 'ORANG MENYEBRANG';
-        } else if (prev.lampu === 'TUNGGU_KOSONG') {
-          statusRingkasan = 'MENUNGGU KOSONG';
-        } else if (adaOrang || prev.lampu === 'KUNING') {
-          statusRingkasan = 'ORANG TERDETEKSI';
-        }
-
-        return {
-          ...prev,
-          jarakKanan: kanan,
-          jarakKiri: kiri,
-          orangKanan,
-          orangKiri,
-          statusRingkasan,
-        };
-      });
-    },
-    [startCrossingSequence]
-  );
 
   // ==========================================================
   // FITUR 4: BUZZER DUA FUNGSI (Pin 4)
@@ -1017,7 +1056,7 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   );
 
   // ==========================================================
-  // TRAFFIC CONTROLLER (Kamera AI YOLO11 / Browser)
+  // TRAFFIC CONTROLLER (Kamera AI HotWheels / Browser)
   // ==========================================================
   const triggerTrafficEmergency = useCallback(() => {
     sounds.playAlert();
@@ -1070,39 +1109,44 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   // ==========================================================
-  // SIKLUS DETIK: PENYEBERANGAN (MERAH 5s -> HIJAU) & TRAFFIC
+  // SIKLUS DETIK: 5-FASE PENYEBERANGAN (SIMULASI) & TRAFFIC
   // ==========================================================
   useEffect(() => {
     if (!isSimulating) return;
 
     const timer = setInterval(() => {
-      setCrossing((prev) => {
-        if (prev.lampu === 'MERAH' && prev.countdownSeconds > 0) {
+      // Saat hardware fisik tidak sedang streaming langsung, jalankan state machine 5-fase di browser
+      if (!isHardwareConnected && !isSerialConnected) {
+        setCrossing((prev) => {
+          if (prev.lampu === 'NORMAL') return prev;
+
           const nextCountdown = prev.countdownSeconds - 1;
-          if (nextCountdown <= 0) {
-            crossingBusyRef.current = false;
-            kananReadyRef.current = true;
-            kiriReadyRef.current = true;
+          if (nextCountdown > 0) {
             return {
               ...prev,
-              jarakKanan: isHardwareConnected || isSerialConnected ? prev.jarakKanan : 35.0,
-              jarakKiri: isHardwareConnected || isSerialConnected ? prev.jarakKiri : 42.0,
-              orangKanan: false,
-              orangKiri: false,
-              lampu: 'HIJAU',
-              buzzer: false,
-              countdownSeconds: 0,
-              siapMenyeberang: true,
-              statusRingkasan: 'AMAN',
+              countdownSeconds: nextCountdown,
             };
           }
+
+          let nextPhase: CrossingPhase = 'NORMAL';
+          if (prev.lampu === 'KUNING_KENDARAAN') nextPhase = 'KUNING_PEJALAN';
+          else if (prev.lampu === 'KUNING_PEJALAN') nextPhase = 'MENYEBRANG';
+          else if (prev.lampu === 'MENYEBRANG') nextPhase = 'KUNING_PENUTUP';
+          else if (prev.lampu === 'KUNING_PENUTUP') nextPhase = 'NORMAL';
+
+          const v = deriveCrossingVisuals(nextPhase);
           return {
             ...prev,
-            countdownSeconds: nextCountdown,
+            lampu: nextPhase,
+            lampuKendaraan: v.lampuKendaraan,
+            lampuPejalan: v.lampuPejalan,
+            buzzer: nextPhase === 'MENYEBRANG',
+            countdownSeconds: v.defaultDuration,
+            siapMenyeberang: nextPhase === 'NORMAL',
+            statusRingkasan: v.statusRingkasan,
           };
-        }
-        return prev;
-      });
+        });
+      }
 
       setTraffic((prev) => {
         if (!prev.isAutomatic) return prev;
@@ -1218,7 +1262,7 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
             }
           }
 
-          // 3. Smart Penyeberangan Data (ESP32)
+          // 3. Smart Penyeberangan Sensor Touch + Dual Traffic Light (ESP32)
           if (data.latestBySubsystem['pedestrian']) {
             const pedPacket = data.latestBySubsystem['pedestrian'];
             const packetAge = now - new Date(pedPacket.timestamp).getTime();
@@ -1226,45 +1270,34 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
               espDataFresh = true;
               if (
                 pedPacket.timestamp !== lastPedTsRef.current &&
-                now - lastCrossingCmdTimeRef.current > 1500
+                now - lastCrossingCmdTimeRef.current > 1200
               ) {
                 lastPedTsRef.current = pedPacket.timestamp;
                 const c = pedPacket.payload;
                 setCrossing((prev) => {
-                  const jKanan = c.jarakKanan !== undefined ? c.jarakKanan : prev.jarakKanan;
-                  const jKiri = c.jarakKiri !== undefined ? c.jarakKiri : prev.jarakKiri;
-                  const oKanan = c.orangKanan ?? (jKanan !== null && jKanan > 0 && jKanan <= 17);
-                  const oKiri = c.orangKiri ?? (jKiri !== null && jKiri > 0 && jKiri <= 25);
-                  const lampu: CrossingPhase = c.lampu ?? prev.lampu;
-                  const siapMenyeberang = lampu === 'HIJAU';
-
-                  crossingBusyRef.current = lampu === 'KUNING' || lampu === 'MERAH';
-                  if (!oKanan) kananReadyRef.current = true;
-                  if (!oKiri) kiriReadyRef.current = true;
-
-                  let statusRingkasan: SmartCrossingData['statusRingkasan'] = 'AMAN';
-                  if (lampu === 'MERAH') statusRingkasan = 'ORANG MENYEBRANG';
-                  else if (lampu === 'TUNGGU_KOSONG') statusRingkasan = 'MENUNGGU KOSONG';
-                  else if (lampu === 'KUNING' || oKanan || oKiri) statusRingkasan = 'ORANG TERDETEKSI';
+                  const touchKanan = Boolean(c.touchKanan ?? c.orangKanan ?? false);
+                  const touchKiri = Boolean(c.touchKiri ?? c.orangKiri ?? false);
+                  const lampu = normalizeCrossingPhase(c.lampu ?? prev.lampu);
+                  const visuals = deriveCrossingVisuals(lampu);
+                  const isCrossingBuzzer =
+                    c.buzzer !== undefined ? Boolean(c.buzzer) : lampu === 'MENYEBRANG';
 
                   return {
                     ...prev,
-                    jarakKanan: jKanan,
-                    jarakKiri: jKiri,
-                    orangKanan: oKanan,
-                    orangKiri: oKiri,
-                    siapMenyeberang,
+                    touchKanan,
+                    touchKiri,
+                    siapMenyeberang: lampu === 'NORMAL',
                     lampu,
-                    buzzer: lampu === 'MERAH',
+                    lampuKendaraan: visuals.lampuKendaraan,
+                    lampuPejalan: visuals.lampuPejalan,
+                    buzzer: isCrossingBuzzer,
                     countdownSeconds:
                       c.countdown !== undefined
                         ? Number(c.countdown)
-                        : lampu === 'MERAH'
-                        ? prev.countdownSeconds || 5
-                        : lampu === 'KUNING'
-                        ? 1
-                        : 0,
-                    statusRingkasan,
+                        : lampu !== prev.lampu
+                        ? visuals.defaultDuration
+                        : prev.countdownSeconds,
+                    statusRingkasan: visuals.statusRingkasan,
                   };
                 });
               }
@@ -1352,7 +1385,7 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   }, [isLiveIoTMode, isSerialConnected, alarmSnoozeUntil]);
 
   const alarmGas = gas.gasValue >= 1500;
-  const alarmSeberang = crossing.lampu === 'MERAH';
+  const alarmSeberang = crossing.lampu === 'MENYEBRANG';
   const buzzerMode: BuzzerMode =
     alarmGas && alarmSeberang ? 'both' : alarmGas ? 'gas' : alarmSeberang ? 'seberang' : 'none';
 
@@ -1399,7 +1432,6 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
         togglePjuDayNight,
         triggerCrossingDetection,
         resetCrossingToSafe,
-        updateUltrasonicDistances,
         controlGasManual,
         setGasSensorValue,
         isPollutionAlarmActive,

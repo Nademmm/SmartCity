@@ -16,7 +16,7 @@ const plexMono = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   title: "SmartCity: Panel Kendali ESP32",
-  description: "Panel kendali perangkat keras ESP32 SmartCity: Sensor Gas MQ, LCD I2C, Dual Ultrasonik, Smart PJU LDR, dan Buzzer.",
+  description: "Panel kendali perangkat keras ESP32 SmartCity: Sensor Gas MQ, LCD I2C, Dual Sensor Touch dan Traffic Light, Smart PJU LDR, dan Buzzer.",
 };
 
 export default function RootLayout({

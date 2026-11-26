@@ -1,5 +1,6 @@
 export type SubsystemType =
   | 'overview'
+  | 'diorama'
   | 'air-quality'
   | 'pedestrian'
   | 'lighting'
@@ -8,7 +9,14 @@ export type SubsystemType =
 
 export type TrafficLightColor = 'green' | 'yellow' | 'red';
 
-export type CrossingPhase = 'HIJAU' | 'KUNING' | 'MERAH' | 'TUNGGU_KOSONG';
+export type CrossingPhase =
+  | 'NORMAL'
+  | 'KUNING_KENDARAAN'
+  | 'KUNING_PEJALAN'
+  | 'MENYEBRANG'
+  | 'KUNING_PENUTUP';
+
+export type SignalLampState = 'HIJAU' | 'KUNING' | 'MERAH';
 
 export type BuzzerMode = 'none' | 'gas' | 'seberang' | 'both';
 
@@ -49,28 +57,34 @@ export interface SmartPJUData {
   siklusWaktu?: 'SIANG' | 'MALAM';
 }
 
-// Fitur 2, 3, 4: Smart Penyeberangan (2 Ultrasonik, 4 Fase Lampu, Buzzer Pin 4)
+// Fitur 2, 3, 4: Smart Penyeberangan (2 Sensor Touch + Dual Traffic Light Kendaraan & Pejalan Kaki + Buzzer Pin 4)
 export interface SmartCrossingData {
-  jarakKanan: number | null; // cm (TRIG 32, ECHO 34)
-  jarakKiri: number | null; // cm (TRIG 33, ECHO 35)
-  batasKanan: number; // 17 cm
-  batasKiri: number; // 25 cm
-  waktuKuning: number; // 1 detik (1000 ms)
-  waktuMenyeberang: number; // 5 detik (5000 ms)
+  touchKanan: boolean; // Pin 17 (HIGH saat disentuh)
+  touchKiri: boolean; // Pin 16 (HIGH saat disentuh)
+  pinTouchKanan: number; // 17
+  pinTouchKiri: number; // 16
+  waktuKuningKendaraan: number; // 3 detik (3000 ms)
+  waktuKuningPejalan: number; // 2 detik (2000 ms)
+  waktuMenyeberang: number; // 10 detik (10000 ms)
   siapMenyeberang: boolean;
-  orangKanan: boolean;
-  orangKiri: boolean;
-  lampu: CrossingPhase; // HIJAU | KUNING | MERAH | TUNGGU_KOSONG
-  buzzer: boolean; // Pin 4
+  lampu: CrossingPhase; // NORMAL | KUNING_KENDARAAN | KUNING_PEJALAN | MENYEBRANG | KUNING_PENUTUP
+  lampuKendaraan: SignalLampState; // HIJAU (12) | KUNING (14) | MERAH (32)
+  lampuPejalan: SignalLampState; // MERAH (27) | KUNING (33) | HIJAU (23)
+  buzzer: boolean; // Pin 4 (aktif saat fase MENYEBRANG)
   countdownSeconds: number;
-  statusRingkasan: 'AMAN' | 'ORANG TERDETEKSI' | 'ORANG MENYEBRANG' | 'MENUNGGU KOSONG';
-  pinTrigKanan: number; // 32
-  pinEchoKanan: number; // 34
-  pinTrigKiri: number; // 33
-  pinEchoKiri: number; // 35
-  pinLedHijau: number; // 12
-  pinLedKuning: number; // 14
-  pinLedMerah: number; // 27
+  statusRingkasan:
+    | 'NORMAL'
+    | 'KENDARAAN BERSIAP'
+    | 'PEJALAN BERSIAP'
+    | 'SILAKAN MENYEBRANG'
+    | 'WAKTU HABIS';
+  sumberTerakhir?: string;
+  pinKendaraanHijau: number; // 12
+  pinKendaraanKuning: number; // 14
+  pinKendaraanMerah: number; // 32
+  pinPejalanMerah: number; // 27
+  pinPejalanKuning: number; // 33
+  pinPejalanHijau: number; // 23
   pinBuzzer: number; // 4
 }
 
@@ -94,7 +108,7 @@ export type DeviceType =
   | 'ESP32 Miniatur IoT'
   | 'Traffic AI Camera'
   | 'Sensor Polusi Gas MQ'
-  | 'Sensor Ultrasonik Penyeberangan'
+  | 'Sensor Touch Penyeberangan'
   | 'Sensor Cahaya LDR PJU';
 
 export type DeviceStatus = 'Online' | 'Offline' | 'Warning';
