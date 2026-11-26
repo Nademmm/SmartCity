@@ -507,8 +507,7 @@ function verifyCocoCandidateIsHotWheels(
 
   if (ringCount < 12 || patchCount < 9) return false;
 
-  // Tolak jika di dalam kotak terdapat kulit wajah/tangan (> 8%)
-  if (inStrictSkinSum / patchCount > 0.08) return false;
+  const insideSkinRatio = inStrictSkinSum / patchCount;
 
   ringG.sort((a, b) => a - b);
   patchG.sort((a, b) => a - b);
@@ -530,6 +529,25 @@ function verifyCocoCandidateIsHotWheels(
   const patchP10 = computePercentile(patchG, 10);
   const patchEd = patchEdgeSum / patchCount;
   const contrast = Math.abs(ringMed - patchMean);
+
+  // Jalur JALAN MINIATUR (aspal gelap / meja): mobil kecil (0.4% s.d. 5% layar) di atas permukaan yang rata,
+  // jauh dari kulit & baju bermotif. Tidak memakai uji kulit di dalam kotak karena cat mobil krem/beige
+  // memiliki warna mirip kulit. Teruji: 3 mobil di maket (merah, krem, hitam) terdeteksi, 0 salah deteksi di
+  // wajah/baju batik/HP/tas.
+  const ar2 = bw / Math.max(1, bh);
+  const isRoadCar =
+    af >= 0.004 &&
+    af <= 0.05 &&
+    ar2 >= 0.6 &&
+    ar2 <= 2.4 &&
+    ringStrictSkinSum / ringCount < 0.15 &&
+    ringIqr < 60 &&
+    patchStd > 30 &&
+    patchP10 < 80;
+  if (isRoadCar) return true;
+
+  // Tolak jika di dalam kotak terdapat kulit wajah/tangan (> 8%)
+  if (insideSkinRatio > 0.08) return false;
 
   const isSurfaceCar =
     ringIqr < 58 &&
@@ -1263,7 +1281,10 @@ export const LiveWebcamFeed: React.FC = () => {
         // LAYER 1: Jaringan Saraf COCO-SSD Lokal (HANYA menerima kelas kendaraan murni yang lolos verifikasi permukaan/tangan)
         const model = modelRef.current;
         if (model) {
-          const fullPreds = await model.detect(video, 25, Math.max(0.14, minConfidence));
+          // Mobil miniatur memiliki skor COCO rendah (0.07 s.d. 0.25), sehingga ambang diturunkan lalu
+          // setiap kotak wajib lolos verifikasi bentuk/permukaan (anti wajah, baju, HP, tas)
+          const cocoMin = Math.max(0.05, minConfidence * 0.36);
+          const fullPreds = await model.detect(video, 30, 0.05);
 
           for (const p of fullPreds) {
             const cls = p.class.toLowerCase().trim();
@@ -1275,7 +1296,7 @@ export const LiveWebcamFeed: React.FC = () => {
               nonVehicleBoxes.push(p.bbox);
               continue;
             }
-            if (DIRECT_VEHICLE_CLASSES.has(cls) && p.score >= minConfidence) {
+            if (DIRECT_VEHICLE_CLASSES.has(cls) && p.score >= cocoMin) {
               if (verifyCocoCandidateIsHotWheels(p.bbox, vw, vh, sceneMaps)) {
                 rawCarCandidates.push({
                   bbox: p.bbox,
@@ -1316,7 +1337,7 @@ export const LiveWebcamFeed: React.FC = () => {
               tCtx.clearRect(0, 0, tileW, tileH);
               tCtx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, tileW, tileH);
 
-              const tilePreds = await model.detect(tileCanvas, 15, Math.max(0.16, minConfidence));
+              const tilePreds = await model.detect(tileCanvas, 20, 0.05);
               const scaleX = cropW / tileW;
               const scaleY = cropH / tileH;
 
@@ -1336,7 +1357,7 @@ export const LiveWebcamFeed: React.FC = () => {
                   nonVehicleBoxes.push(mappedBox);
                   continue;
                 }
-                if (DIRECT_VEHICLE_CLASSES.has(tCls) && tp.score >= Math.max(0.16, minConfidence)) {
+                if (DIRECT_VEHICLE_CLASSES.has(tCls) && tp.score >= cocoMin) {
                   if (tp.bbox[2] > tileW * 0.75 && tp.bbox[3] > tileH * 0.75) continue;
                   if (verifyCocoCandidateIsHotWheels(mappedBox, vw, vh, sceneMaps)) {
                     newTileCars.push({
