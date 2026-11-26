@@ -43,26 +43,23 @@ AUGMENT_INFERENCE = os.getenv("AUGMENT_INFERENCE", "false").lower() == "true"
 # Set DETECT_ANY_OBJECT = False agar HANYA mendeteksi kendaraan (Mobil, Truk, Bus, Motor, Sepeda)
 DETECT_ANY_OBJECT = False
 
-# COCO vehicle class IDs HANYA kendaraan jalan raya:
-# 1: bicycle, 2: car, 3: motorcycle, 5: bus, 7: truck
-TARGET_CLASSES = [1, 2, 3, 5, 7]
-EXCLUDE_CLASSES = [0] # 0 = Person (DITOLAK TOTAL)
+# COCO class IDs yang dinormalisasi menjadi Mobil (HotWheels / Diecast):
+# 2: car, 5: bus, 7: truck (semua dihitung sebagai Mobil miniatur)
+TARGET_CLASSES = [2, 5, 7]
+EXCLUDE_CLASSES = [0, 1, 3] # Tolak person, bicycle, motorcycle
 
 CLASS_NAMES = {
-    1: "Bicycle",
-    2: "Car",
-    3: "Motorcycle",
-    5: "Bus",
-    7: "Truck"
+    2: "Mobil",
+    5: "Mobil",
+    7: "Mobil"
 }
 
-
-
 # ==============================================================
-# 3. Threshold Logika Bisnis Klasifikasi Kemacetan
+# 3. Threshold Logika Bisnis Klasifikasi Kemacetan (Khusus Mobil di Kamera)
+# 0 - 2 Mobil = LANCAR | 3 - 5 Mobil = PADAT | >= 6 Mobil = MACET TOTAL
 # ==============================================================
-THRESHOLD_LANCAR = int(os.getenv("THRESHOLD_LANCAR", "5"))
-THRESHOLD_MACET = int(os.getenv("THRESHOLD_MACET", "10"))
+THRESHOLD_LANCAR = int(os.getenv("THRESHOLD_LANCAR", "3"))
+THRESHOLD_MACET = int(os.getenv("THRESHOLD_MACET", "6"))
 
 # ==============================================================
 # 4. Integrasi Dashboard Next.js (SMARTCITY Command Center)

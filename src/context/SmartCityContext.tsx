@@ -130,7 +130,7 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   const [isHardwareConnected, setIsHardwareConnected] = useState<boolean>(false);
   const [isCameraConnected, setIsCameraConnected] = useState<boolean>(false);
 
-  // Web Serial API persistent state (tetap terhubung walau pindah halaman)
+  // Web Serial API persistent state
   const [isWebSerialSupported, setIsWebSerialSupported] = useState<boolean>(false);
   const [isSerialConnected, setIsSerialConnected] = useState<boolean>(false);
   const [isConnectingSerial, setIsConnectingSerial] = useState<boolean>(false);
@@ -142,11 +142,21 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   const keepReadingRef = useRef<boolean>(false);
   const lastSerialCloudSyncRef = useRef<number>(0);
 
-  // Command lock timestamps agar paket lama dari antrean tidak menimpa klik baru user di UI
+  // Command lock timestamps
   const lastGasCmdTimeRef = useRef<number>(0);
   const lastPjuCmdTimeRef = useRef<number>(0);
   const lastCrossingCmdTimeRef = useRef<number>(0);
 
+  // Track processed telemetry packet timestamps so we never re-apply stale packets
+  const lastTrafficTsRef = useRef<string>('');
+  const lastPjuTsRef = useRef<string>('');
+  const lastPedTsRef = useRef<string>('');
+  const lastGasTsRef = useRef<string>('');
+
+  // Crossing state refs to avoid slider race conditions
+  const crossingBusyRef = useRef<boolean>(false);
+  const kananReadyRef = useRef<boolean>(true);
+  const kiriReadyRef = useRef<boolean>(true);
   const crossingTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -228,9 +238,6 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
     []
   );
 
-  // ==========================================================
-  // FUNGSI TULIS KE USB SERIAL LANGSUNG (JIKA TERHUBUNG DI BROWSER)
-  // ==========================================================
   const writeToSerialPort = useCallback(async (cmdString: string) => {
     if (writerRef.current) {
       try {
@@ -244,18 +251,13 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
     return false;
   }, []);
 
-  // ==========================================================
-  // PENGIRIMAN PERINTAH KE HARDWARE ESP32 (WEB SERIAL + CLOUD API)
-  // ==========================================================
   const sendCommand = useCallback(
     async (action: string, value?: unknown) => {
       const formatted = action.trim().startsWith('CMD:') ? action.trim() : `CMD:${action.trim()}`;
       setSerialLogs((prev) => [...prev.slice(-140), `>>> PERINTAH DIKIRIM: ${formatted}`]);
 
-      // 1. Kirim langsung lewat USB Web Serial jika sedang terhubung di browser ini
       await writeToSerialPort(formatted);
 
-      // 2. Kirim ke endpoint unifikasi (/api/iot/telemetry & /api/iot/control) agar bridge / perangkat lain tersinkron
       try {
         await Promise.allSettled([
           fetch('/api/iot/telemetry', {
@@ -285,15 +287,15 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   );
 
   // ==========================================================
-  // PEMROSESAN PAKET JSON DARI ESP32 (BAIK DARI USB MAUPUN CLOUD)
+  // PEMROSESAN PAKET JSON DAN BARIS SERIAL DARI ESP32
   // ==========================================================
   const applyIncomingEspJson = useCallback(
     (parsed: any) => {
       const now = Date.now();
       const nowTime = new Date().toLocaleTimeString('id-ID', { hour12: false });
 
-      // 1. Update Gas MQ (jika tidak sedang dalam masa transisi klik manual 2.5 detik)
-      if (parsed.gas !== undefined && now - lastGasCmdTimeRef.current > 2500) {
+      // 1. Update Gas MQ
+      if (parsed.gas !== undefined && now - lastGasCmdTimeRef.current > 2000) {
         const val = Number(parsed.gas);
         const mode: 'AUTO' | 'MANUAL' = parsed.gasMode === 'MANUAL' ? 'MANUAL' : 'AUTO';
         const statusPolusi: GasAirQualityData['statusPolusi'] =
@@ -324,12 +326,16 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
       }
 
       // 2. Update Penyeberangan Ultrasonik
-      if (parsed.lampu !== undefined && now - lastCrossingCmdTimeRef.current > 2000) {
+      if (parsed.lampu !== undefined) {
         const jKanan = parsed.jarakKanan !== undefined ? parsed.jarakKanan : null;
         const jKiri = parsed.jarakKiri !== undefined ? parsed.jarakKiri : null;
         const oKanan = Boolean(parsed.orangKanan ?? (jKanan !== null && jKanan > 0 && jKanan <= 17));
         const oKiri = Boolean(parsed.orangKiri ?? (jKiri !== null && jKiri > 0 && jKiri <= 25));
         const lampu: CrossingPhase = parsed.lampu || 'HIJAU';
+
+        crossingBusyRef.current = lampu === 'KUNING' || lampu === 'MERAH';
+        if (!oKanan) kananReadyRef.current = true;
+        if (!oKiri) kiriReadyRef.current = true;
 
         let statusRingkasan: SmartCrossingData['statusRingkasan'] = 'AMAN';
         if (lampu === 'MERAH') statusRingkasan = 'ORANG MENYEBRANG';
@@ -345,13 +351,20 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
           siapMenyeberang: lampu === 'HIJAU',
           lampu,
           buzzer: lampu === 'MERAH',
-          countdownSeconds: lampu === 'MERAH' ? (prev.countdownSeconds || 5) : lampu === 'KUNING' ? 1 : 0,
+          countdownSeconds:
+            parsed.countdown !== undefined
+              ? Number(parsed.countdown)
+              : lampu === 'MERAH'
+              ? prev.countdownSeconds || 5
+              : lampu === 'KUNING'
+              ? 1
+              : 0,
           statusRingkasan,
         }));
       }
 
       // 3. Update Smart PJU
-      if (parsed.ldr !== undefined && now - lastPjuCmdTimeRef.current > 2500) {
+      if (parsed.ldr !== undefined && now - lastPjuCmdTimeRef.current > 2000) {
         const ldr = Number(parsed.ldr);
         const mode: 'AUTO' | 'ON' | 'OFF' = parsed.pjuMode || 'AUTO';
         const isDark = ldr > 2000;
@@ -377,6 +390,142 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
     },
     [alarmSnoozeUntil]
   );
+
+  // Parsing baris teks biasa dari Thonny/ESP32 (jika script tanpa [JSON] atau saat sedang countdown)
+  const applyIncomingPlainLine = useCallback((line: string) => {
+    const nowTime = new Date().toLocaleTimeString('id-ID', { hour12: false });
+    setIsHardwareConnected(true);
+    setLastTelemetryTimestamp(nowTime);
+
+    const gasMatch = line.match(/^Nilai gas:\s*(\d+)/i);
+    if (gasMatch) {
+      const val = parseInt(gasMatch[1], 10);
+      const statusPolusi: GasAirQualityData['statusPolusi'] =
+        val < 1000 ? 'UDARA BERSIH' : val < 1500 ? 'POLUSI SEDANG' : 'POLUSI TINGGI';
+      setGas((prev) => ({
+        ...prev,
+        gasValue: val,
+        statusPolusi,
+        isAlarmActive: val >= 1500,
+        lcdBaris1: formatLcdLine1(val),
+        lcdBaris2: formatLcdLine2(statusPolusi),
+      }));
+      return;
+    }
+
+    const kananMatch = line.match(/^Jarak kanan:\s*([\d.]+)/i);
+    if (kananMatch) {
+      const jk = parseFloat(kananMatch[1]);
+      const ok = jk > 0 && jk <= 17;
+      setCrossing((prev) => ({
+        ...prev,
+        jarakKanan: jk,
+        orangKanan: ok,
+      }));
+      return;
+    }
+    if (/^Jarak kanan:\s*tidak terbaca/i.test(line)) {
+      setCrossing((prev) => ({
+        ...prev,
+        jarakKanan: null,
+        orangKanan: false,
+      }));
+      return;
+    }
+
+    const kiriMatch = line.match(/^Jarak kiri:\s*([\d.]+)/i);
+    if (kiriMatch) {
+      const jkr = parseFloat(kiriMatch[1]);
+      const okr = jkr > 0 && jkr <= 25;
+      setCrossing((prev) => ({
+        ...prev,
+        jarakKiri: jkr,
+        orangKiri: okr,
+      }));
+      return;
+    }
+    if (/^Jarak kiri:\s*tidak terbaca/i.test(line)) {
+      setCrossing((prev) => ({
+        ...prev,
+        jarakKiri: null,
+        orangKiri: false,
+      }));
+      return;
+    }
+
+    if (line.includes('>>> LAMPU KUNING')) {
+      crossingBusyRef.current = true;
+      setCrossing((prev) => ({
+        ...prev,
+        lampu: 'KUNING',
+        siapMenyeberang: false,
+        buzzer: false,
+        countdownSeconds: 1,
+        statusRingkasan: 'ORANG TERDETEKSI',
+      }));
+      return;
+    }
+
+    if (line.includes('>>> LAMPU MERAH')) {
+      crossingBusyRef.current = true;
+      setCrossing((prev) => ({
+        ...prev,
+        lampu: 'MERAH',
+        siapMenyeberang: false,
+        buzzer: true,
+        countdownSeconds: 5,
+        statusRingkasan: 'ORANG MENYEBRANG',
+      }));
+      return;
+    }
+
+    const sisaMatch = line.match(/^Sisa waktu:\s*(\d+)/i);
+    if (sisaMatch) {
+      const sec = parseInt(sisaMatch[1], 10);
+      crossingBusyRef.current = true;
+      setCrossing((prev) => ({
+        ...prev,
+        lampu: 'MERAH',
+        siapMenyeberang: false,
+        buzzer: true,
+        countdownSeconds: sec,
+        statusRingkasan: 'ORANG MENYEBRANG',
+      }));
+      return;
+    }
+
+    if (line.includes('>>> SELESAI - LAMPU HIJAU') || line.includes('>>> AREA KOSONG')) {
+      crossingBusyRef.current = false;
+      setCrossing((prev) => ({
+        ...prev,
+        lampu: 'HIJAU',
+        siapMenyeberang: true,
+        buzzer: false,
+        countdownSeconds: 0,
+        statusRingkasan: 'AMAN',
+      }));
+      return;
+    }
+
+    const ldrMatch = line.match(/^Nilai LDR:\s*(\d+)/i);
+    if (ldrMatch) {
+      const ldrVal = parseInt(ldrMatch[1], 10);
+      setPju((prev) => {
+        const isDark = ldrVal > prev.thresholdLdr;
+        const kondisi = prev.pjuMode === 'ON' ? 'MANUAL_ON' : prev.pjuMode === 'OFF' ? 'MANUAL_OFF' : isDark ? 'GELAP' : 'TERANG';
+        const pjuStatus = kondisi === 'MANUAL_ON' || kondisi === 'GELAP' ? 'MENYALA' : 'MATI';
+        const ledsOn = pjuStatus === 'MENYALA';
+        return {
+          ...prev,
+          ldrValue: ldrVal,
+          kondisi,
+          pjuStatus,
+          ledMerah: ledsOn,
+          ledPutih: ledsOn,
+        };
+      });
+    }
+  }, []);
 
   // ==========================================================
   // KONEKSI LANGSUNG WEB SERIAL API (CHROME / EDGE -> COM3)
@@ -431,9 +580,8 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
                 const parsed = JSON.parse(trimmed.substring(6));
                 applyIncomingEspJson(parsed);
 
-                // Sinkronkan juga ke Cloud API setiap 600ms + ambil perintah jarak jauh jika ada
                 const nowMs = Date.now();
-                if (nowMs - lastSerialCloudSyncRef.current >= 600) {
+                if (nowMs - lastSerialCloudSyncRef.current >= 500) {
                   lastSerialCloudSyncRef.current = nowMs;
                   const isPjuOn = parsed.pjuStatus === 'MENYALA';
                   fetch('/api/iot/telemetry', {
@@ -454,6 +602,7 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
                           orangKanan: parsed.orangKanan,
                           orangKiri: parsed.orangKiri,
                           lampu: parsed.lampu,
+                          countdown: parsed.countdown ?? 0,
                           buzzer: parsed.lampu === 'MERAH',
                           siapMenyeberang: parsed.lampu === 'HIJAU',
                         },
@@ -481,6 +630,8 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
                     .catch(() => {});
                 }
               } catch {}
+            } else {
+              applyIncomingPlainLine(trimmed);
             }
           }
         }
@@ -497,7 +648,7 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
     } finally {
       setIsConnectingSerial(false);
     }
-  }, [addEventLog, applyIncomingEspJson, writeToSerialPort]);
+  }, [addEventLog, applyIncomingEspJson, applyIncomingPlainLine, writeToSerialPort]);
 
   const disconnectSerial = useCallback(async () => {
     keepReadingRef.current = false;
@@ -617,7 +768,7 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   }, [controlPjuManual]);
 
   // ==========================================================
-  // FITUR 2 & 3: SMART PENYEBERANGAN (HIJAU -> KUNING 1s -> MERAH 5s -> TUNGGU_KOSONG)
+  // FITUR 2 & 3: SMART PENYEBERANGAN (HIJAU -> KUNING 1s -> MERAH 5s -> HIJAU)
   // ==========================================================
   const startCrossingSequence = useCallback(
     (jKanan: number | null, jKiri: number | null, label: string, sendHwCommand: boolean) => {
@@ -625,9 +776,13 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
         clearTimeout(crossingTimerRef.current);
       }
 
+      crossingBusyRef.current = true;
       lastCrossingCmdTimeRef.current = Date.now();
       const oKanan = jKanan !== null && jKanan > 0 && jKanan <= 17;
       const oKiri = jKiri !== null && jKiri > 0 && jKiri <= 25;
+
+      if (oKanan) kananReadyRef.current = false;
+      if (oKiri) kiriReadyRef.current = false;
 
       if (sendHwCommand) {
         sendCommand('CMD:FORCE_CROSSING');
@@ -669,11 +824,11 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   const triggerCrossingDetection = useCallback(
     (side: 'kanan' | 'kiri' | 'kedua' | 'force') => {
       sounds.playSuccess();
-      const jarakKanan = side === 'kiri' ? 35 : side === 'force' ? crossing.jarakKanan : 12;
-      const jarakKiri = side === 'kanan' ? 42 : side === 'force' ? crossing.jarakKiri : 18;
+      const jarakKanan = side === 'kiri' ? 35 : side === 'force' ? 12 : 12;
+      const jarakKiri = side === 'kanan' ? 42 : side === 'force' ? 18 : 18;
       startCrossingSequence(jarakKanan, jarakKiri, `CMD:FORCE_CROSSING (${side.toUpperCase()})`, true);
     },
-    [crossing.jarakKanan, crossing.jarakKiri, startCrossingSequence]
+    [startCrossingSequence]
   );
 
   const resetCrossingToSafe = useCallback(() => {
@@ -681,6 +836,9 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
       clearTimeout(crossingTimerRef.current);
     }
     sounds.playClick();
+    crossingBusyRef.current = false;
+    kananReadyRef.current = true;
+    kiriReadyRef.current = true;
     lastCrossingCmdTimeRef.current = Date.now();
     sendCommand('CMD:CROSSING_RESET');
     setCrossing((prev) => ({
@@ -705,22 +863,20 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
       const orangKiri = kiri !== null && kiri > 0 && kiri <= 25;
       const adaOrang = orangKanan || orangKiri;
 
-      setCrossing((prev) => {
-        if (prev.lampu === 'HIJAU' && prev.siapMenyeberang && adaOrang) {
-          setTimeout(() => {
-            startCrossingSequence(kanan, kiri, 'Deteksi Ultrasonik', true);
-          }, 0);
-          return {
-            ...prev,
-            jarakKanan: kanan,
-            jarakKiri: kiri,
-            orangKanan,
-            orangKiri,
-          };
-        }
+      if (!orangKanan) kananReadyRef.current = true;
+      if (!orangKiri) kiriReadyRef.current = true;
 
-        if (prev.lampu === 'TUNGGU_KOSONG' && !adaOrang) {
-          sendCommand('CMD:CROSSING_RESET');
+      const pemicuBaru =
+        (orangKanan && kananReadyRef.current) || (orangKiri && kiriReadyRef.current);
+
+      if (!crossingBusyRef.current && pemicuBaru) {
+        startCrossingSequence(kanan, kiri, 'Deteksi Ultrasonik', true);
+        return;
+      }
+
+      setCrossing((prev) => {
+        if (!adaOrang && prev.lampu === 'TUNGGU_KOSONG') {
+          crossingBusyRef.current = false;
           return {
             ...prev,
             jarakKanan: kanan,
@@ -754,7 +910,7 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
         };
       });
     },
-    [startCrossingSequence, sendCommand]
+    [startCrossingSequence]
   );
 
   // ==========================================================
@@ -914,7 +1070,7 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   // ==========================================================
-  // SIKLUS DETIK: PENYEBERANGAN (MERAH 5s -> TUNGGU_KOSONG / HIJAU) & TRAFFIC
+  // SIKLUS DETIK: PENYEBERANGAN (MERAH 5s -> HIJAU) & TRAFFIC
   // ==========================================================
   useEffect(() => {
     if (!isSimulating) return;
@@ -924,19 +1080,15 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
         if (prev.lampu === 'MERAH' && prev.countdownSeconds > 0) {
           const nextCountdown = prev.countdownSeconds - 1;
           if (nextCountdown <= 0) {
-            const adaOrang = prev.orangKanan || prev.orangKiri;
-            if (adaOrang) {
-              return {
-                ...prev,
-                lampu: 'TUNGGU_KOSONG',
-                buzzer: false,
-                countdownSeconds: 0,
-                siapMenyeberang: false,
-                statusRingkasan: 'MENUNGGU KOSONG',
-              };
-            }
+            crossingBusyRef.current = false;
+            kananReadyRef.current = true;
+            kiriReadyRef.current = true;
             return {
               ...prev,
+              jarakKanan: isHardwareConnected || isSerialConnected ? prev.jarakKanan : 35.0,
+              jarakKiri: isHardwareConnected || isSerialConnected ? prev.jarakKiri : 42.0,
+              orangKanan: false,
+              orangKiri: false,
               lampu: 'HIJAU',
               buzzer: false,
               countdownSeconds: 0,
@@ -982,7 +1134,7 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [isSimulating]);
+  }, [isSimulating, isHardwareConnected, isSerialConnected]);
 
   // ==========================================================
   // POLLING TELEMETRI DARI /api/iot/telemetry
@@ -991,7 +1143,6 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
     if (!isLiveIoTMode) return;
 
     let isMounted = true;
-    let lastProcessedTimestamp = '';
 
     const syncTelemetry = async () => {
       try {
@@ -1009,127 +1160,163 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
         if (data.latestBySubsystem['traffic']) {
           const t = data.latestBySubsystem['traffic'];
           const packetAge = now - new Date(t.timestamp).getTime();
-          if (packetAge < 15000) camDataFresh = true;
-
-          if (t.timestamp !== lastProcessedTimestamp) {
-            const p = t.payload;
-            setTraffic((prev) => ({
-              ...prev,
-              density: p.density ?? prev.density,
-              vehicleCount: p.vehicleCount ?? prev.vehicleCount,
-              statusText: p.statusText ?? prev.statusText,
-              avgSpeedKmh: p.avgSpeedKmh ?? prev.avgSpeedKmh,
-              queueLengthMeters: p.queueLengthMeters ?? prev.queueLengthMeters,
-              vehicleCounts: p.counts ?? prev.vehicleCounts,
-              currentLight: p.currentLight ?? prev.currentLight,
-            }));
+          if (packetAge < 10000) {
+            camDataFresh = true;
+            if (t.timestamp !== lastTrafficTsRef.current) {
+              lastTrafficTsRef.current = t.timestamp;
+              const p = t.payload;
+              setTraffic((prev) => ({
+                ...prev,
+                density: p.density ?? prev.density,
+                vehicleCount: p.vehicleCount ?? prev.vehicleCount,
+                statusText: p.statusText ?? prev.statusText,
+                avgSpeedKmh: p.avgSpeedKmh ?? prev.avgSpeedKmh,
+                queueLengthMeters: p.queueLengthMeters ?? prev.queueLengthMeters,
+                vehicleCounts: p.counts ?? prev.vehicleCounts,
+                currentLight: p.currentLight ?? prev.currentLight,
+              }));
+            }
           }
         }
 
-        // Jika sudah terhubung langsung lewat USB Web Serial di browser ini, pembacaan USB lokal yang jadi prioritas utama
+        // Jika tidak sedang terhubung langsung lewat USB Web Serial, ambil paket baru dari Cloud Bridge
         if (!isSerialConnected) {
           // 2. Smart PJU Data (ESP32)
-          if (data.latestBySubsystem['pju'] && now - lastPjuCmdTimeRef.current > 2500) {
+          if (data.latestBySubsystem['pju']) {
             const pjuPacket = data.latestBySubsystem['pju'];
             const packetAge = now - new Date(pjuPacket.timestamp).getTime();
-            if (packetAge < 15000) espDataFresh = true;
+            if (packetAge < 8000) {
+              espDataFresh = true;
+              if (
+                pjuPacket.timestamp !== lastPjuTsRef.current &&
+                now - lastPjuCmdTimeRef.current > 2000
+              ) {
+                lastPjuTsRef.current = pjuPacket.timestamp;
+                const p = pjuPacket.payload;
+                setPju((prev) => {
+                  const ldr = p.ldrValue ?? p.ldr ?? prev.ldrValue;
+                  const mode: 'AUTO' | 'ON' | 'OFF' = p.pjuMode ?? prev.pjuMode;
+                  const isDark = ldr > prev.thresholdLdr;
+                  const kondisi: SmartPJUData['kondisi'] =
+                    p.kondisi ??
+                    (mode === 'ON' ? 'MANUAL_ON' : mode === 'OFF' ? 'MANUAL_OFF' : isDark ? 'GELAP' : 'TERANG');
+                  const pjuStatus: SmartPJUData['pjuStatus'] =
+                    p.pjuStatus ?? (kondisi === 'MANUAL_ON' || kondisi === 'GELAP' ? 'MENYALA' : 'MATI');
+                  const ledsOn = pjuStatus === 'MENYALA';
 
-            const p = pjuPacket.payload;
-            setPju((prev) => {
-              const ldr = p.ldrValue ?? p.ldr ?? prev.ldrValue;
-              const mode: 'AUTO' | 'ON' | 'OFF' = p.pjuMode ?? prev.pjuMode;
-              const isDark = ldr > prev.thresholdLdr;
-              const kondisi: SmartPJUData['kondisi'] =
-                p.kondisi ?? (mode === 'ON' ? 'MANUAL_ON' : mode === 'OFF' ? 'MANUAL_OFF' : isDark ? 'GELAP' : 'TERANG');
-              const pjuStatus: SmartPJUData['pjuStatus'] =
-                p.pjuStatus ?? (kondisi === 'MANUAL_ON' || kondisi === 'GELAP' ? 'MENYALA' : 'MATI');
-              const ledsOn = pjuStatus === 'MENYALA';
-
-              return {
-                ...prev,
-                ldrValue: ldr,
-                pjuMode: mode,
-                kondisi,
-                pjuStatus,
-                ledMerah: p.ledMerah !== undefined ? p.ledMerah : ledsOn,
-                ledPutih: p.ledPutih !== undefined ? p.ledPutih : ledsOn,
-              };
-            });
+                  return {
+                    ...prev,
+                    ldrValue: ldr,
+                    pjuMode: mode,
+                    kondisi,
+                    pjuStatus,
+                    ledMerah: p.ledMerah !== undefined ? p.ledMerah : ledsOn,
+                    ledPutih: p.ledPutih !== undefined ? p.ledPutih : ledsOn,
+                  };
+                });
+              }
+            }
           }
 
           // 3. Smart Penyeberangan Data (ESP32)
-          if (data.latestBySubsystem['pedestrian'] && now - lastCrossingCmdTimeRef.current > 2000) {
+          if (data.latestBySubsystem['pedestrian']) {
             const pedPacket = data.latestBySubsystem['pedestrian'];
             const packetAge = now - new Date(pedPacket.timestamp).getTime();
-            if (packetAge < 15000) espDataFresh = true;
+            if (packetAge < 8000) {
+              espDataFresh = true;
+              if (
+                pedPacket.timestamp !== lastPedTsRef.current &&
+                now - lastCrossingCmdTimeRef.current > 1500
+              ) {
+                lastPedTsRef.current = pedPacket.timestamp;
+                const c = pedPacket.payload;
+                setCrossing((prev) => {
+                  const jKanan = c.jarakKanan !== undefined ? c.jarakKanan : prev.jarakKanan;
+                  const jKiri = c.jarakKiri !== undefined ? c.jarakKiri : prev.jarakKiri;
+                  const oKanan = c.orangKanan ?? (jKanan !== null && jKanan > 0 && jKanan <= 17);
+                  const oKiri = c.orangKiri ?? (jKiri !== null && jKiri > 0 && jKiri <= 25);
+                  const lampu: CrossingPhase = c.lampu ?? prev.lampu;
+                  const siapMenyeberang = lampu === 'HIJAU';
 
-            const c = pedPacket.payload;
-            setCrossing((prev) => {
-              const jKanan = c.jarakKanan !== undefined ? c.jarakKanan : prev.jarakKanan;
-              const jKiri = c.jarakKiri !== undefined ? c.jarakKiri : prev.jarakKiri;
-              const oKanan = c.orangKanan ?? (jKanan !== null && jKanan > 0 && jKanan <= 17);
-              const oKiri = c.orangKiri ?? (jKiri !== null && jKiri > 0 && jKiri <= 25);
-              const lampu: CrossingPhase = c.lampu ?? prev.lampu;
-              const siapMenyeberang = lampu === 'HIJAU';
+                  crossingBusyRef.current = lampu === 'KUNING' || lampu === 'MERAH';
+                  if (!oKanan) kananReadyRef.current = true;
+                  if (!oKiri) kiriReadyRef.current = true;
 
-              let statusRingkasan: SmartCrossingData['statusRingkasan'] = 'AMAN';
-              if (lampu === 'MERAH') statusRingkasan = 'ORANG MENYEBRANG';
-              else if (lampu === 'TUNGGU_KOSONG') statusRingkasan = 'MENUNGGU KOSONG';
-              else if (lampu === 'KUNING' || oKanan || oKiri) statusRingkasan = 'ORANG TERDETEKSI';
+                  let statusRingkasan: SmartCrossingData['statusRingkasan'] = 'AMAN';
+                  if (lampu === 'MERAH') statusRingkasan = 'ORANG MENYEBRANG';
+                  else if (lampu === 'TUNGGU_KOSONG') statusRingkasan = 'MENUNGGU KOSONG';
+                  else if (lampu === 'KUNING' || oKanan || oKiri) statusRingkasan = 'ORANG TERDETEKSI';
 
-              return {
-                ...prev,
-                jarakKanan: jKanan,
-                jarakKiri: jKiri,
-                orangKanan: oKanan,
-                orangKiri: oKiri,
-                siapMenyeberang,
-                lampu,
-                buzzer: lampu === 'MERAH',
-                countdownSeconds: lampu === 'MERAH' ? (prev.countdownSeconds || 5) : lampu === 'KUNING' ? 1 : 0,
-                statusRingkasan,
-              };
-            });
+                  return {
+                    ...prev,
+                    jarakKanan: jKanan,
+                    jarakKiri: jKiri,
+                    orangKanan: oKanan,
+                    orangKiri: oKiri,
+                    siapMenyeberang,
+                    lampu,
+                    buzzer: lampu === 'MERAH',
+                    countdownSeconds:
+                      c.countdown !== undefined
+                        ? Number(c.countdown)
+                        : lampu === 'MERAH'
+                        ? prev.countdownSeconds || 5
+                        : lampu === 'KUNING'
+                        ? 1
+                        : 0,
+                    statusRingkasan,
+                  };
+                });
+              }
+            }
           }
 
           // 4. Sensor Gas MQ + LCD 16x2 Data (ESP32)
-          if (data.latestBySubsystem['air-quality'] && now - lastGasCmdTimeRef.current > 2500) {
+          if (data.latestBySubsystem['air-quality']) {
             const gasPacket = data.latestBySubsystem['air-quality'];
             const packetAge = now - new Date(gasPacket.timestamp).getTime();
-            if (packetAge < 15000) espDataFresh = true;
+            if (packetAge < 8000) {
+              espDataFresh = true;
+              if (
+                gasPacket.timestamp !== lastGasTsRef.current &&
+                now - lastGasCmdTimeRef.current > 2000
+              ) {
+                lastGasTsRef.current = gasPacket.timestamp;
+                const g = gasPacket.payload;
+                setGas((prev) => {
+                  const incomingMode: 'AUTO' | 'MANUAL' = g.gasMode === 'MANUAL' ? 'MANUAL' : 'AUTO';
+                  const val = g.gasValue ?? g.gas ?? prev.gasValue;
 
-            const g = gasPacket.payload;
-            setGas((prev) => {
-              const incomingMode: 'AUTO' | 'MANUAL' = g.gasMode === 'MANUAL' ? 'MANUAL' : 'AUTO';
-              const val = g.gasValue ?? g.gas ?? prev.gasValue;
+                  const statusPolusi: GasAirQualityData['statusPolusi'] =
+                    g.statusPolusi ??
+                    (val < 1000 ? 'UDARA BERSIH' : val < 1500 ? 'POLUSI SEDANG' : 'POLUSI TINGGI');
+                  const isHigh = val >= 1500;
+                  const nowTime = new Date().toLocaleTimeString('id-ID', { hour12: false });
 
-              const statusPolusi: GasAirQualityData['statusPolusi'] =
-                g.statusPolusi ?? (val < 1000 ? 'UDARA BERSIH' : val < 1500 ? 'POLUSI SEDANG' : 'POLUSI TINGGI');
-              const isHigh = val >= 1500;
-              const nowTime = new Date().toLocaleTimeString('id-ID', { hour12: false });
+                  if (isHigh) {
+                    if (Date.now() > alarmSnoozeUntil) {
+                      setIsPollutionAlarmActive(true);
+                      sounds.startPollutionAlarm();
+                    }
+                  } else {
+                    sounds.stopPollutionAlarm();
+                    setIsPollutionAlarmActive(false);
+                  }
 
-              if (isHigh) {
-                if (Date.now() > alarmSnoozeUntil) {
-                  setIsPollutionAlarmActive(true);
-                  sounds.startPollutionAlarm();
-                }
-              } else {
-                sounds.stopPollutionAlarm();
-                setIsPollutionAlarmActive(false);
+                  return {
+                    ...prev,
+                    gasValue: val,
+                    gasMode: incomingMode,
+                    statusPolusi,
+                    isAlarmActive: isHigh,
+                    lastAlarmTime: isHigh ? prev.lastAlarmTime || nowTime : prev.lastAlarmTime,
+                    lcdBaris1: formatLcdLine1(val),
+                    lcdBaris2: formatLcdLine2(statusPolusi),
+                    lcdTersedia: true,
+                  };
+                });
               }
-
-              return {
-                ...prev,
-                gasValue: val,
-                gasMode: incomingMode,
-                statusPolusi,
-                isAlarmActive: isHigh,
-                lastAlarmTime: isHigh ? prev.lastAlarmTime || nowTime : prev.lastAlarmTime,
-                lcdBaris1: formatLcdLine1(val),
-                lcdBaris2: formatLcdLine2(statusPolusi),
-                lcdTersedia: true,
-              };
-            });
+            }
           }
         }
 
@@ -1157,14 +1344,13 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
       }
     };
 
-    const interval = setInterval(syncTelemetry, 1000);
+    const interval = setInterval(syncTelemetry, 900);
     return () => {
       isMounted = false;
       clearInterval(interval);
     };
   }, [isLiveIoTMode, isSerialConnected, alarmSnoozeUntil]);
 
-  // Dual-Function Buzzer Mode (update_buzzer(alarm_gas, alarm_seberang))
   const alarmGas = gas.gasValue >= 1500;
   const alarmSeberang = crossing.lampu === 'MERAH';
   const buzzerMode: BuzzerMode =

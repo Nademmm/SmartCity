@@ -547,16 +547,16 @@ export const OverviewView: React.FC = () => {
                 04
               </span>
               <h2 className="font-semibold text-sm text-[var(--text-primary)] truncate">
-                Simpang &amp; Kamera AI
+                Kamera Deteksi Kemacetan Mobil
               </h2>
-              <span className="rack-tag hidden sm:inline-block">PORT 8088</span>
+              <span className="rack-tag hidden sm:inline-block">WEBCAM AI</span>
             </div>
             <button
               type="button"
               onClick={() => setActiveSubsystem('traffic')}
               className="ctrl-btn ctrl-btn-sm font-mono"
             >
-              Kamera
+              Buka Kamera
             </button>
           </div>
 
@@ -582,16 +582,26 @@ export const OverviewView: React.FC = () => {
               </div>
 
               <div className="rack-well p-3 font-mono">
-                <span className="text-[10px] text-[var(--text-secondary)] block">KENDARAAN</span>
+                <span className="text-[10px] text-[var(--text-secondary)] block">MOBIL DI KAMERA</span>
                 <span className="text-sm sm:text-base font-bold mt-0.5 block truncate">
-                  {traffic.vehicleCount} Unit
+                  {traffic.vehicleCount} / 6 Mobil
                 </span>
               </div>
 
               <div className="rack-well p-3 font-mono">
-                <span className="text-[10px] text-[var(--text-secondary)] block">KEPADATAN</span>
-                <span className="text-sm sm:text-base font-bold mt-0.5 block truncate">
-                  {traffic.density}% ({traffic.statusText})
+                <span className="text-[10px] text-[var(--text-secondary)] block">STATUS JALAN</span>
+                <span
+                  className="text-sm sm:text-base font-bold mt-0.5 block truncate"
+                  style={{
+                    color:
+                      traffic.vehicleCount >= 6
+                        ? 'var(--sig-red)'
+                        : traffic.vehicleCount >= 3
+                        ? 'var(--sig-amber)'
+                        : 'var(--sig-green)',
+                  }}
+                >
+                  {traffic.statusText}
                 </span>
               </div>
             </div>

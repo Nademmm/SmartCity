@@ -93,39 +93,22 @@ class YOLODetector:
 
                     x1, y1, x2, y2 = map(int, (x1, y1, x2, y2))
 
-                    # Nama kelas
-                    if cls_id in config.CLASS_NAMES:
-                        class_name = config.CLASS_NAMES[cls_id]
-                    else:
-                        class_name = f"Item ({result.names.get(cls_id, cls_id)})"
-
-                    # Hitung statistik per tipe
-                    if cls_id == 2 or cls_id == 4:
-                        counts["car"] += 1
-                    elif cls_id == 3 or cls_id == 1:
-                        counts["motorcycle"] += 1
-                    elif cls_id == 5 or cls_id == 6:
-                        counts["bus"] += 1
-                    elif cls_id == 7 or cls_id == 8:
-                        counts["truck"] += 1
-                    else:
-                        counts["car"] += 1
-
+                    # Semua deteksi kendaraan miniatur diklasifikasikan sebagai Mobil
+                    class_name = "Mobil"
+                    counts["car"] += 1
                     total_vehicles += 1
-
 
                     detections.append({
                         "bbox": (x1, y1, x2, y2),
                         "track_id": track_id,
-                        "class_id": cls_id,
+                        "class_id": 2,
                         "class_name": class_name,
                         "confidence": float(confidence)
                     })
 
         # ==============================================================
-        # 2. DETEKTOR KHUSUS MOBIL MINIATUR / LEGO (Handheld & Tabletop Lego Vision)
-        # Menangkap mobil lego/miniatur buatan sendiri (kardus, lego brick, diecast)
-        # yang tidak memiliki label langsung di model pra-latih COCO.
+        # 2. DETEKTOR KHUSUS MOBIL MINIATUR / HOTWHEELS
+        # Menangkap mobil HotWheels/miniatur yang sedang tampil di kamera
         # ==============================================================
         try:
             lego_dets = self._detect_lego_and_miniatures(frame, detections)
@@ -134,15 +117,16 @@ class YOLODetector:
                 counts["car"] += 1
                 detections.append(l_det)
         except Exception as e:
-            logging.debug(f"Lego detection heuristic warning: {e}")
+            logging.debug(f"Miniature detection heuristic warning: {e}")
 
-        # Klasifikasi Status Kemacetan berdasarkan Logika Bisnis:
-        if total_vehicles < config.THRESHOLD_LANCAR:
+        # Klasifikasi Status Kemacetan (Hanya dari mobil yang tampil di kamera saat ini):
+        # 0 - 2 Mobil: LANCAR | 3 - 5 Mobil: PADAT | >= 6 Mobil: MACET TOTAL
+        if total_vehicles <= 2:
             status = "LANCAR"
             status_color = (0, 220, 100)
             badge_variant = "success"
-        elif total_vehicles <= config.THRESHOLD_MACET:
-            status = "SEDANG / RAMAI LANCAR"
+        elif total_vehicles < config.THRESHOLD_MACET:
+            status = "PADAT"
             status_color = (0, 215, 255)
             badge_variant = "warning"
         else:
@@ -150,7 +134,7 @@ class YOLODetector:
             status_color = (50, 50, 255)
             badge_variant = "danger"
 
-        density_percent = min(98, max(15, int((total_vehicles / 12.0) * 100)))
+        density_percent = 0 if total_vehicles == 0 else min(100, int((total_vehicles / 6.0) * 100))
 
         return {
             "detections": detections,
@@ -310,11 +294,11 @@ class YOLODetector:
                 "bbox": cb,
                 "track_id": 90 + len(lego_items),
                 "class_id": 2,
-                "class_name": "Mobil (Lego/Miniatur)",
+                "class_name": "Mobil",
                 "confidence": 0.96
             })
 
-            if len(lego_items) >= 4:
+            if len(lego_items) >= 20:
                 break
 
         return lego_items

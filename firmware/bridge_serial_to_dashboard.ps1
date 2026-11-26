@@ -1,15 +1,13 @@
 # ==========================================================
 # SMARTCITY - ESP32 SERIAL BRIDGE KE DASHBOARD NEXT.JS
 # Membaca data serial USB dari COM3 dan mengirim telemetri
-# secara otomatis ke http://localhost:3000/api/iot/telemetry
+# secara otomatis ke https://smartcity-esp32.vercel.app & localhost
 # ==========================================================
 
 $portName = "COM3"
 $baudRate = 115200
-$baseUrls = @(
-    "https://smartcity-esp32.vercel.app",
-    "http://127.0.0.1:3000"
-)
+$cloudUrl = "https://smartcity-esp32.vercel.app"
+$localUrl = "http://127.0.0.1:3000"
 
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "     SMARTCITY ESP32 - SERIAL BRIDGE KE DASHBOARD (COM3)  " -ForegroundColor Cyan
@@ -23,6 +21,7 @@ $currentJarakKiri = $null
 $currentOrangKanan = $false
 $currentOrangKiri = $false
 $currentLampu = "HIJAU"
+$currentCountdown = 0
 $currentLdr = 1200
 $currentKondisi = "TERANG"
 $currentPju = "MATI"
@@ -30,10 +29,24 @@ $currentPjuMode = "AUTO"
 $lastSendTime = [DateTime]::MinValue
 $lastCommandPollTime = [DateTime]::MinValue
 
+function Test-LocalServerActive {
+    try {
+        $tcp = New-Object System.Net.Sockets.TcpClient
+        $async = $tcp.BeginConnect("127.0.0.1", 3000, $null, $null)
+        $wait = $async.AsyncWaitHandle.WaitOne(120, $false)
+        if ($wait -and $tcp.Connected) {
+            $tcp.Close()
+            return $true
+        }
+        $tcp.Close()
+    } catch {}
+    return $false
+}
+
 while ($true) {
     $port = New-Object System.IO.Ports.SerialPort $portName, $baudRate, "None", 8, "One"
-    $port.ReadTimeout = 2000
-    $port.WriteTimeout = 2000
+    $port.ReadTimeout = 1000
+    $port.WriteTimeout = 1000
     $port.DtrEnable = $false
     $port.RtsEnable = $false
 
@@ -49,6 +62,7 @@ while ($true) {
                 if ([string]::IsNullOrWhiteSpace($line)) { continue }
 
                 Write-Host "ESP32 >> $line" -ForegroundColor Gray
+                $forceImmediateSend = $false
 
                 # 1. Parsing format JSON langsung jika tersedia
                 if ($line.StartsWith("[JSON]")) {
@@ -62,11 +76,16 @@ while ($true) {
                         $currentJarakKiri = $parsed.jarakKiri
                         $currentOrangKanan = [bool]$parsed.orangKanan
                         $currentOrangKiri = [bool]$parsed.orangKiri
+                        if ($parsed.lampu -ne $currentLampu) {
+                            $forceImmediateSend = $true
+                        }
                         $currentLampu = $parsed.lampu
+                        $currentCountdown = if ($null -ne $parsed.countdown) { [int]$parsed.countdown } else { 0 }
                         $currentLdr = [int]$parsed.ldr
                         $currentKondisi = $parsed.kondisi
                         $currentPju = $parsed.pjuStatus
                         $currentPjuMode = if ($parsed.pjuMode) { $parsed.pjuMode } else { "AUTO" }
+                        $forceImmediateSend = $true
                     } catch {}
                 }
                 # 2. Parsing teks reguler dari Thonny
@@ -101,12 +120,24 @@ while ($true) {
                         $currentLampu = $matches[1].Trim()
                     } elseif ($line -match "LAMPU KUNING") {
                         $currentLampu = "KUNING"
+                        $currentCountdown = 1
+                        $forceImmediateSend = $true
                     } elseif ($line -match "LAMPU MERAH") {
                         $currentLampu = "MERAH"
-                    } elseif ($line -match "WAKTU MENYEBERANG SELESAI") {
-                        $currentLampu = "TUNGGU_KOSONG"
-                    } elseif ($line -match "AREA KOSONG") {
+                        $currentCountdown = 5
+                        $forceImmediateSend = $true
+                    } elseif ($line -match "Sisa waktu:\s*(\d+)") {
+                        $currentLampu = "MERAH"
+                        $currentCountdown = [int]$matches[1]
+                        $forceImmediateSend = $true
+                    } elseif ($line -match "SELESAI - LAMPU HIJAU" -or $line -match "AREA KOSONG") {
                         $currentLampu = "HIJAU"
+                        $currentCountdown = 0
+                        $forceImmediateSend = $true
+                    } elseif ($line -match "WAKTU MENYEBERANG SELESAI") {
+                        $currentLampu = "HIJAU"
+                        $currentCountdown = 0
+                        $forceImmediateSend = $true
                     }
                     if ($line -match "Nilai LDR:\s*(\d+)") {
                         $currentLdr = [int]$matches[1]
@@ -130,9 +161,9 @@ while ($true) {
                     }
                 }
 
-                # Kirim telemetri ke Next.js Dashboard setiap ~500ms
+                # Kirim telemetri ke Dashboard setiap [JSON] / perubahan fase atau minimal 450ms
                 $now = [DateTime]::Now
-                if (($now - $lastSendTime).TotalMilliseconds -ge 500) {
+                if ($forceImmediateSend -or (($now - $lastSendTime).TotalMilliseconds -ge 450)) {
                     $lastSendTime = $now
                     $isPjuActive = ($currentPju -eq "MENYALA")
                     $bodyObj = @{
@@ -154,9 +185,10 @@ while ($true) {
                                 orangKanan = $currentOrangKanan
                                 orangKiri = $currentOrangKiri
                                 lampu = $currentLampu
+                                countdown = $currentCountdown
                                 buzzer = ($currentLampu -eq "MERAH")
                                 siapMenyeberang = ($currentLampu -eq "HIJAU")
-                                statusRingkasan = if ($currentLampu -eq "MERAH") { "ORANG MENYEBRANG" } elseif ($currentLampu -eq "TUNGGU_KOSONG") { "MENUNGGU KOSONG" } elseif ($currentOrangKanan -or $currentOrangKiri -or $currentLampu -eq "KUNING") { "ORANG TERDETEKSI" } else { "AMAN" }
+                                statusRingkasan = if ($currentLampu -eq "MERAH") { "ORANG MENYEBRANG" } elseif ($currentOrangKanan -or $currentOrangKiri -or $currentLampu -eq "KUNING") { "ORANG TERDETEKSI" } else { "AMAN" }
                             }
                             pju = @{
                                 ldrValue = $currentLdr
@@ -170,10 +202,16 @@ while ($true) {
                     }
 
                     $jsonBody = ConvertTo-Json -InputObject $bodyObj -Depth 5 -Compress
-                    foreach ($baseUrl in $baseUrls) {
+
+                    $activeUrls = @($cloudUrl)
+                    if (Test-LocalServerActive) {
+                        $activeUrls += $localUrl
+                    }
+
+                    foreach ($baseUrl in $activeUrls) {
                         try {
                             $postRes = Invoke-RestMethod -Uri "$baseUrl/api/iot/telemetry" -Method Post -Body $jsonBody -ContentType "application/json" -TimeoutSec 2
-                            Write-Host "-> Terkirim ($baseUrl): Gas=$currentGas ($currentStatusPolusi), LDR=$currentLdr ($currentPjuMode), Seberang=$currentLampu" -ForegroundColor Green
+                            Write-Host "-> Terkirim ($baseUrl): Gas=$currentGas, Kanan=$currentJarakKanan, Kiri=$currentJarakKiri, Seberang=$currentLampu ($currentCountdown s)" -ForegroundColor Green
                             if ($postRes.commands -and $postRes.commands.Count -gt 0) {
                                 foreach ($cmdItem in $postRes.commands) {
                                     Write-Host ">> MENERUSKAN PERINTAH KE ESP32 ($baseUrl): $($cmdItem.action)" -ForegroundColor Magenta
@@ -181,30 +219,25 @@ while ($true) {
                                 }
                             }
                         } catch {
-                            if ($baseUrl -like "https://*") {
-                                Write-Host "x Gagal kirim ke Cloud ($baseUrl): $($_.Exception.Message)" -ForegroundColor Red
-                            }
+                            Write-Host "x Gagal kirim ($baseUrl): $($_.Exception.Message)" -ForegroundColor Red
                         }
                     }
                 }
-
-                # Periksa dan kirim perintah kontrol tertunda dari Dashboard ke ESP32
-                if (($now - $lastCommandPollTime).TotalMilliseconds -ge 350) {
-                    $lastCommandPollTime = $now
-                    foreach ($baseUrl in $baseUrls) {
-                        try {
-                            $controlRes = Invoke-RestMethod -Uri "$baseUrl/api/iot/control?deviceId=ESP32-MINIATURE" -Method Get -TimeoutSec 2
-                            if ($controlRes.commands -and $controlRes.commands.Count -gt 0) {
-                                foreach ($cmdItem in $controlRes.commands) {
-                                    Write-Host ">> MENERUSKAN PERINTAH KE ESP32 ($baseUrl): $($cmdItem.action)" -ForegroundColor Magenta
-                                    $port.WriteLine($cmdItem.action)
-                                }
-                            }
-                        } catch {}
-                    }
-                }
             } catch [System.TimeoutException] {
-                # Timeout normal saat tidak ada baris baru masuk dalam rentang timeout
+                # Poll perintah saat idle
+                $now = [DateTime]::Now
+                if (($now - $lastCommandPollTime).TotalMilliseconds -ge 500) {
+                    $lastCommandPollTime = $now
+                    try {
+                        $controlRes = Invoke-RestMethod -Uri "$cloudUrl/api/iot/control?deviceId=ESP32-MINIATURE" -Method Get -TimeoutSec 2
+                        if ($controlRes.commands -and $controlRes.commands.Count -gt 0) {
+                            foreach ($cmdItem in $controlRes.commands) {
+                                Write-Host ">> MENERUSKAN PERINTAH KE ESP32: $($cmdItem.action)" -ForegroundColor Magenta
+                                $port.WriteLine($cmdItem.action)
+                            }
+                        }
+                    } catch {}
+                }
             } catch [System.IO.IOException] {
                 Write-Host "`n[DISCONNECTED] Koneksi serial terputus: $($_.Exception.Message)" -ForegroundColor Red
                 break
