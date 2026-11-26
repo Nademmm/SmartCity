@@ -252,6 +252,7 @@ export const Diorama3DView: React.FC = () => {
     controlGasManual,
   } = useSmartCity();
 
+  const stageRef = useRef<HTMLElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const pinElementsRef = useRef<Record<string, HTMLButtonElement | null>>({});
 
@@ -261,6 +262,8 @@ export const Diorama3DView: React.FC = () => {
   const [autoRotate, setAutoRotate] = useState<boolean>(false);
   const [syncCarsWithCam, setSyncCarsWithCam] = useState<boolean>(false);
   const [selectedHotspotId, setSelectedHotspotId] = useState<HotspotMeta['id'] | null>(null);
+  const [isFullMode, setIsFullMode] = useState<boolean>(false);
+  const [showFullControls, setShowFullControls] = useState<boolean>(false);
 
   // Live hardware ref read inside requestAnimationFrame without recreating the WebGL scene
   const liveStateRef = useRef({
@@ -329,6 +332,58 @@ export const Diorama3DView: React.FC = () => {
     testBuzzerAlarm();
   }, [testBuzzerAlarm]);
 
+  const enterFullMode = useCallback(() => {
+    setIsFullMode(true);
+    try {
+      const el = stageRef.current;
+      if (el && el.requestFullscreen && !document.fullscreenElement) {
+        el.requestFullscreen().catch(() => {});
+      }
+    } catch {
+      // Fallback ke CSS fixed full-viewport jika browser (misal iOS Safari) tidak mendukung Fullscreen API
+    }
+  }, []);
+
+  const exitFullMode = useCallback(() => {
+    setIsFullMode(false);
+    setShowFullControls(false);
+    try {
+      if (document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
+    } catch {}
+  }, []);
+
+  const toggleFullMode = useCallback(() => {
+    if (isFullMode) {
+      exitFullMode();
+    } else {
+      enterFullMode();
+    }
+  }, [isFullMode, enterFullMode, exitFullMode]);
+
+  // Sinkronkan jika user keluar dari browser fullscreen memakai tombol ESC bawaan browser
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      if (!document.fullscreenElement) {
+        setIsFullMode(false);
+        setShowFullControls(false);
+      }
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
+  }, []);
+
+  // Kunci scroll halaman di belakang saat Full Mode aktif
+  useEffect(() => {
+    if (!isFullMode) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [isFullMode]);
+
   // Sync AutoRotate directly to OrbitControls
   useEffect(() => {
     if (controlsRef.current) {
@@ -356,16 +411,20 @@ export const Diorama3DView: React.FC = () => {
     }
   }, [visualMode, pju.kondisi, pju.pjuStatus]);
 
-  // Close hotspot card with Escape key (a11y R-26)
+  // Close hotspot card or exit Full Mode with Escape key (a11y R-26)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setSelectedHotspotId(null);
+        if (selectedHotspotId) {
+          setSelectedHotspotId(null);
+        } else if (isFullMode) {
+          exitFullMode();
+        }
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [selectedHotspotId, isFullMode, exitFullMode]);
 
   // =========================================================================
   // THREE.JS SCENE LIFECYCLE
@@ -1446,12 +1505,35 @@ export const Diorama3DView: React.FC = () => {
           >
             Mobil Kamera: {syncCarsWithCam ? `${traffic.vehicleCount}` : '6 Model'}
           </button>
+
+          <button
+            type="button"
+            onClick={toggleFullMode}
+            className="ctrl-btn ctrl-btn-sm ctrl-btn-active font-mono"
+            title="Tampilkan 3D Miniatur layar penuh"
+          >
+            Full Mode
+          </button>
         </div>
       </section>
 
-      {/* Main 3D WebGL Interactive Stage */}
-      <section aria-label="Kanvas Interaktif 3D Smart City" className="rack-panel overflow-hidden relative">
-        <div className="relative w-full h-[58dvh] min-h-[380px] max-h-[680px] select-none overflow-hidden">
+      {/* Main 3D WebGL Interactive Stage (Normal Card OR Full Mode Edge-to-Edge) */}
+      <section
+        ref={stageRef}
+        aria-label="Kanvas Interaktif 3D Smart City"
+        className={
+          isFullMode
+            ? 'fixed inset-0 z-50 w-screen h-dvh bg-[var(--bg-canvas)] overflow-hidden'
+            : 'rack-panel overflow-hidden relative'
+        }
+      >
+        <div
+          className={
+            isFullMode
+              ? 'relative w-full h-full select-none overflow-hidden'
+              : 'relative w-full h-[58dvh] min-h-[380px] max-h-[680px] select-none overflow-hidden'
+          }
+        >
           {/* WebGL Mount Target */}
           <div ref={viewportRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
 
@@ -1495,37 +1577,105 @@ export const Diorama3DView: React.FC = () => {
             </div>
           )}
 
-          {/* Top-Left Live Hardware Status HUD on 3D Canvas */}
-          <div className="absolute top-2.5 left-2.5 z-10 pointer-events-none flex flex-wrap gap-1.5 max-w-[75%]">
-            <span className="px-2 py-1 rounded-md bg-[#0f172a]/85 text-[#f8fafc] font-mono text-[10px] sm:text-[11px] font-semibold border border-white/15 backdrop-blur-xs">
-              TL1: {crossing.lampuKendaraan} | TL2: {crossing.lampuPejalan}
-              {crossing.countdownSeconds > 0 ? ` (${crossing.countdownSeconds}s)` : ''}
-            </span>
-            <span className="px-2 py-1 rounded-md bg-[#0f172a]/85 text-[#f8fafc] font-mono text-[10px] sm:text-[11px] font-semibold border border-white/15 backdrop-blur-xs">
-              PJU: {pju.pjuStatus} (LDR {pju.ldrValue})
-            </span>
-            <span
-              className="px-2 py-1 rounded-md font-mono text-[10px] sm:text-[11px] font-semibold border backdrop-blur-xs"
-              style={{
-                backgroundColor: isGasHigh ? 'rgba(153,27,27,0.92)' : 'rgba(15,23,42,0.85)',
-                borderColor: isGasHigh ? '#fca5a5' : 'rgba(255,255,255,0.15)',
-                color: '#f8fafc',
-              }}
-            >
-              MQ: {gas.gasValue} ({gas.statusPolusi})
-            </span>
-            {buzzerMode !== 'none' && (
-              <span className="px-2 py-1 rounded-md bg-[#b91c1c]/95 text-white font-mono text-[10px] sm:text-[11px] font-bold border border-[#fca5a5]">
-                BUZZER AKTIF ({buzzerMode.toUpperCase()})
+          {/* Top Bar Inside Viewport: Live Status HUD + Full Mode Floating Toolbar */}
+          <div className="absolute top-2.5 left-2.5 right-2.5 z-15 pointer-events-none flex flex-wrap items-start justify-between gap-2">
+            {/* Top-Left Live Hardware Status HUD */}
+            <div className="flex flex-wrap gap-1.5 max-w-full sm:max-w-[60%]">
+              <span className="px-2 py-1 rounded-md bg-[#0f172a]/85 text-[#f8fafc] font-mono text-[10px] sm:text-[11px] font-semibold border border-white/15 backdrop-blur-xs">
+                TL1: {crossing.lampuKendaraan} | TL2: {crossing.lampuPejalan}
+                {crossing.countdownSeconds > 0 ? ` (${crossing.countdownSeconds}s)` : ''}
               </span>
-            )}
+              <span className="px-2 py-1 rounded-md bg-[#0f172a]/85 text-[#f8fafc] font-mono text-[10px] sm:text-[11px] font-semibold border border-white/15 backdrop-blur-xs">
+                PJU: {pju.pjuStatus} (LDR {pju.ldrValue})
+              </span>
+              <span
+                className="px-2 py-1 rounded-md font-mono text-[10px] sm:text-[11px] font-semibold border backdrop-blur-xs"
+                style={{
+                  backgroundColor: isGasHigh ? 'rgba(153,27,27,0.92)' : 'rgba(15,23,42,0.85)',
+                  borderColor: isGasHigh ? '#fca5a5' : 'rgba(255,255,255,0.15)',
+                  color: '#f8fafc',
+                }}
+              >
+                MQ: {gas.gasValue} ({gas.statusPolusi})
+              </span>
+              {buzzerMode !== 'none' && (
+                <span className="px-2 py-1 rounded-md bg-[#b91c1c]/95 text-white font-mono text-[10px] sm:text-[11px] font-bold border border-[#fca5a5]">
+                  BUZZER AKTIF ({buzzerMode.toUpperCase()})
+                </span>
+              )}
+            </div>
+
+            {/* Top-Right Full Mode Controls */}
+            <div className="pointer-events-auto flex items-center gap-1.5 flex-wrap justify-end">
+              {isFullMode && (
+                <>
+                  <div className="bg-[var(--bg-panel)]/92 backdrop-blur-md border border-[var(--border-strong)] p-0.5 rounded-lg inline-flex items-center gap-0.5 shadow-sm">
+                    {(
+                      [
+                        { id: 'auto', label: 'Auto' },
+                        { id: 'day', label: 'Siang' },
+                        { id: 'blueprint', label: 'Ink' },
+                        { id: 'night', label: 'Malam' },
+                      ] as const
+                    ).map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setVisualMode(m.id)}
+                        className={`h-7 px-2 rounded-[5px] text-[11px] font-mono font-semibold transition-colors cursor-pointer ${
+                          visualMode === m.id
+                            ? 'bg-[var(--accent-bg)] text-[var(--accent-text)] border border-[var(--accent-border)]'
+                            : 'bg-transparent text-[var(--text-secondary)] border border-transparent hover:text-[var(--text-primary)]'
+                        }`}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowPins((p) => !p)}
+                    className={`ctrl-btn ctrl-btn-sm font-mono ${showPins ? 'ctrl-btn-amber' : ''}`}
+                  >
+                    Pin
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setAutoRotate((r) => !r)}
+                    className={`ctrl-btn ctrl-btn-sm font-mono ${autoRotate ? 'ctrl-btn-green' : ''}`}
+                  >
+                    360
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowFullControls((c) => !c)}
+                    className={`ctrl-btn ctrl-btn-sm font-mono ${showFullControls ? 'ctrl-btn-active' : ''}`}
+                  >
+                    Kontrol
+                  </button>
+                </>
+              )}
+
+              <button
+                type="button"
+                onClick={toggleFullMode}
+                className={`ctrl-btn ctrl-btn-sm font-mono shadow-sm ${
+                  isFullMode ? 'ctrl-btn-red' : 'ctrl-btn-active'
+                }`}
+              >
+                {isFullMode ? 'Keluar Full' : 'Full Mode'}
+              </button>
+            </div>
           </div>
 
           {/* Active Hotspot Inspector Drawer (Top-Right over 3D canvas) */}
           {selectedHotspot && (
             <aside
               aria-label="Detail Modul 3D Terpilih"
-              className="absolute right-2.5 left-2.5 sm:left-auto sm:right-3 top-12 sm:top-3 sm:w-80 z-20"
+              className="absolute right-2.5 left-2.5 sm:left-auto sm:right-3 top-14 sm:top-14 sm:w-80 z-20"
             >
               <div className="bg-[var(--bg-panel)]/95 backdrop-blur-md border-2 border-[var(--text-primary)] rounded-xl p-3.5 shadow-lg space-y-2.5">
                 <div className="flex items-start justify-between gap-2">
@@ -1663,6 +1813,56 @@ export const Diorama3DView: React.FC = () => {
                 </div>
               </div>
             </aside>
+          )}
+
+          {/* Optional Quick Hardware Controls Overlay Inside Full Mode */}
+          {isFullMode && showFullControls && (
+            <div className="absolute bottom-16 left-2.5 right-2.5 z-20 flex justify-center pointer-events-none">
+              <div className="pointer-events-auto bg-[var(--bg-panel)]/95 backdrop-blur-md border border-[var(--border-strong)] rounded-xl p-2.5 shadow-lg flex flex-wrap items-center justify-center gap-2 max-w-4xl">
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] font-mono text-[var(--text-secondary)] mr-0.5">TOUCH:</span>
+                  <button type="button" onClick={() => triggerCrossingDetection('kanan')} className="ctrl-btn ctrl-btn-sm font-mono">
+                    17
+                  </button>
+                  <button type="button" onClick={() => triggerCrossingDetection('kiri')} className="ctrl-btn ctrl-btn-sm font-mono">
+                    16
+                  </button>
+                  <button type="button" onClick={resetCrossingToSafe} className="ctrl-btn ctrl-btn-sm ctrl-btn-green font-mono">
+                    Normal
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] font-mono text-[var(--text-secondary)] mr-0.5">PJU:</span>
+                  <button type="button" onClick={() => controlPjuManual('ON')} className={`ctrl-btn ctrl-btn-sm font-mono ${pju.pjuMode === 'ON' ? 'ctrl-btn-amber' : ''}`}>
+                    ON
+                  </button>
+                  <button type="button" onClick={() => controlPjuManual('OFF')} className={`ctrl-btn ctrl-btn-sm font-mono ${pju.pjuMode === 'OFF' ? 'ctrl-btn-active' : ''}`}>
+                    OFF
+                  </button>
+                  <button type="button" onClick={() => controlPjuManual('AUTO')} className={`ctrl-btn ctrl-btn-sm font-mono ${pju.pjuMode === 'AUTO' ? 'ctrl-btn-green' : ''}`}>
+                    AUTO
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] font-mono text-[var(--text-secondary)] mr-0.5">MQ:</span>
+                  <button type="button" onClick={() => controlGasManual('BERSIH')} className="ctrl-btn ctrl-btn-sm ctrl-btn-green font-mono">
+                    650
+                  </button>
+                  <button type="button" onClick={() => controlGasManual('SEDANG')} className="ctrl-btn ctrl-btn-sm ctrl-btn-amber font-mono">
+                    1250
+                  </button>
+                  <button type="button" onClick={() => controlGasManual('BAHAYA')} className="ctrl-btn ctrl-btn-sm ctrl-btn-red font-mono">
+                    2100
+                  </button>
+                </div>
+
+                <button type="button" onClick={handleBuzzerTestWith3D} className="ctrl-btn ctrl-btn-sm ctrl-btn-amber font-mono">
+                  Uji Buzzer
+                </button>
+              </div>
+            </div>
           )}
 
           {/* Bottom Camera View Presets Bar inside Viewport */}
