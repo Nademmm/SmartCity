@@ -1,9 +1,26 @@
 import serial
+import serial.tools.list_ports
 import time
 import base64
-import os
+import sys
 
 source_file = r"firmware\main_thonny_micropython.py"
+
+def detect_esp32_port():
+    if len(sys.argv) > 1 and sys.argv[1].upper().startswith("COM"):
+        return sys.argv[1].upper()
+    ports = list(serial.tools.list_ports.comports())
+    if not ports:
+        raise RuntimeError("Tidak ada perangkat USB Serial (ESP32) yang terdeteksi! Periksa kabel USB.")
+    # Prioritaskan adapter USB-to-Serial umum ESP32 (CH340, CP210x, FTDI, USB-SERIAL)
+    for p in ports:
+        desc = f"{p.description} {p.manufacturer or ''}".upper()
+        if any(k in desc for k in ("CH340", "CP210", "FTDI", "USB-SERIAL", "SILICON LABS", "UART")):
+            return p.device
+    return ports[0].device
+
+port_name = detect_esp32_port()
+print(f"[USB DETECTED] Menggunakan port ESP32: {port_name}")
 
 with open(source_file, "rb") as f:
     local_bytes = f.read()
@@ -12,7 +29,7 @@ b64 = base64.b64encode(local_bytes).decode("ascii")
 print(f"File lokal: {len(local_bytes)} bytes, base64: {len(b64)} chars")
 
 ser = serial.Serial()
-ser.port = "COM3"
+ser.port = port_name
 ser.baudrate = 115200
 ser.timeout = 2
 ser.dtr = False
@@ -20,9 +37,12 @@ ser.rts = False
 ser.open()
 time.sleep(0.3)
 
-# Masuk ke Raw REPL
-ser.write(b"\r\x03\x03\x01")
-time.sleep(0.5)
+# Masuk ke Raw REPL (kirim Ctrl+C beberapa kali untuk menghentikan loop main.py)
+ser.write(b"\r\x03\x03\x03")
+time.sleep(0.4)
+ser.read_all()
+ser.write(b"\x01")
+time.sleep(0.4)
 init_resp = ser.read_all().decode("utf-8", errors="ignore")
 print("Prompt Raw REPL:", repr(init_resp))
 

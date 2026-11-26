@@ -1,16 +1,41 @@
 # ==========================================================
 # SMARTCITY - ESP32 SERIAL BRIDGE KE DASHBOARD NEXT.JS
-# Membaca data serial USB dari COM3 (Sensor Touch + Dual Traffic Light)
+# Auto-deteksi port USB Serial ESP32 (CH340/CP210x/COM3/COM5/dll)
 # dan mengirim telemetri otomatis ke https://smartcity-esp32.vercel.app & localhost
 # ==========================================================
 
-$portName = "COM3"
 $baudRate = 115200
 $cloudUrl = "https://smartcity-esp32.vercel.app"
 $localUrl = "http://127.0.0.1:3000"
 
+function Find-Esp32ComPort {
+    try {
+        $pnpPorts = Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '\((COM\d+)\)' }
+        foreach ($dev in $pnpPorts) {
+            if ($dev.Name -match 'CH340|CP210|FTDI|USB-SERIAL|Silicon Labs|UART') {
+                if ($dev.Name -match '\((COM\d+)\)') {
+                    return $matches[1]
+                }
+            }
+        }
+        foreach ($dev in $pnpPorts) {
+            if ($dev.Name -match '\((COM\d+)\)') {
+                return $matches[1]
+            }
+        }
+    } catch {}
+    $rawPorts = [System.IO.Ports.SerialPort]::GetPortNames()
+    if ($rawPorts -and $rawPorts.Count -gt 0) {
+        return $rawPorts[0]
+    }
+    return "COM5"
+}
+
+$portName = Find-Esp32ComPort
+
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host "     SMARTCITY ESP32 - SERIAL BRIDGE KE DASHBOARD (COM3)  " -ForegroundColor Cyan
+Write-Host "     SMARTCITY ESP32 - SERIAL BRIDGE KE DASHBOARD ($portName)  " -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
 $currentGas = 650
@@ -53,6 +78,7 @@ function Get-StatusRingkasan($fase) {
 }
 
 while ($true) {
+    $portName = Find-Esp32ComPort
     $port = New-Object System.IO.Ports.SerialPort $portName, $baudRate, "None", 8, "One"
     $port.ReadTimeout = 1000
     $port.WriteTimeout = 1000
