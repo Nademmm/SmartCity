@@ -26,7 +26,7 @@ import {
   INITIAL_LOGS,
 } from '@/services/iotSimulationEngine';
 import { sounds } from '@/services/soundEffects';
-import { MqttBrowserClient, MQTT_TOPIC_TELEMETRY } from '@/lib/mqttBrowserClient';
+import { MqttBrowserClient, MQTT_TOPIC_TELEMETRY, MQTT_TOPIC_CMD } from '@/lib/mqttBrowserClient';
 
 function formatLcdLine1(gasVal: number): string {
   return `Nilai MQ: ${String(gasVal).padStart(4, ' ')}  `;
@@ -206,6 +206,9 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   const lastSerialCloudSyncRef = useRef<number>(0);
   const mqttClientRef = useRef<MqttBrowserClient | null>(null);
   const lastMqttRxTimeRef = useRef<number>(0);
+  const lastMqttPublishTimeRef = useRef<number>(0);
+  const lastLocalCmdSentRef = useRef<{ cmd: string; ts: number }>({ cmd: '', ts: 0 });
+  const isSerialConnectedRef = useRef<boolean>(false);
 
   // Command lock timestamps
   const lastGasCmdTimeRef = useRef<number>(0);
@@ -316,12 +319,15 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
     async (action: string, value?: unknown) => {
       const formatted = action.trim().startsWith('CMD:') ? action.trim() : `CMD:${action.trim()}`;
       setSerialLogs((prev) => [...prev.slice(-140), `>>> PERINTAH DIKIRIM: ${formatted}`]);
+      lastLocalCmdSentRef.current = { cmd: formatted, ts: Date.now() };
 
-      // 1. Kirim langsung lewat MQTT Cloud (real-time ke ESP32 Wi-Fi di jaringan mana pun)
-      mqttClientRef.current?.publishCommand(formatted);
+      // 1. Jika laptop sedang terhubung USB, tulis langsung ke ESP32 (0ms lag)
+      const wroteSerial = await writeToSerialPort(formatted);
 
-      // 2. Kirim langsung lewat USB Web Serial jika sedang terpasang
-      await writeToSerialPort(formatted);
+      // 2. Jika bukan laptop USB (misal dari HP/device lain), kirim lewat MQTT Cloud agar langsung diteruskan laptop ke ESP32
+      if (!wroteSerial) {
+        mqttClientRef.current?.publishCommand(formatted);
+      }
 
       // 3. Cadangan lewat HTTP API Vercel
       try {
@@ -643,6 +649,7 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
       }
 
       setIsSerialConnected(true);
+      isSerialConnectedRef.current = true;
       setIsHardwareConnected(true);
       keepReadingRef.current = true;
 
@@ -671,10 +678,17 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
 
             if (trimmed.startsWith('[JSON]')) {
               try {
-                const parsed = JSON.parse(trimmed.substring(6));
+                const rawJson = trimmed.substring(6);
+                const parsed = JSON.parse(rawJson);
                 applyIncomingEspJson(parsed);
 
                 const nowMs = Date.now();
+                // Siarkan langsung ke MQTT Cloud setiap 250ms agar HP/device lain melihat data secara real-time!
+                if (nowMs - lastMqttPublishTimeRef.current >= 250) {
+                  lastMqttPublishTimeRef.current = nowMs;
+                  mqttClientRef.current?.publishTelemetry(rawJson);
+                }
+
                 if (nowMs - lastSerialCloudSyncRef.current >= 450) {
                   lastSerialCloudSyncRef.current = nowMs;
                   const isPjuOn = parsed.pjuStatus === 'MENYALA';
@@ -761,6 +775,7 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
       portRef.current = null;
     }
     setIsSerialConnected(false);
+    isSerialConnectedRef.current = false;
     setIsHardwareConnected(false);
     const ts = new Date().toLocaleTimeString('id-ID', { hour12: false });
     setSerialLogs((prev) => [...prev, `[${ts}] [USB SERIAL] Koneksi USB diputus.`]);
@@ -1189,19 +1204,31 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   }, [isSimulating, isHardwareConnected, isSerialConnected]);
 
   // ==========================================================
-  // KONEKSI REAL-TIME MQTT OVER WSS (ESP32 WIFI <-> HP/LAPTOP MANA PUN)
+  // KONEKSI REAL-TIME MQTT OVER WSS (BRIDGE USB LAPTOP <-> HP/DEVICE LAIN)
   // ==========================================================
   useEffect(() => {
     if (!isLiveIoTMode) return;
 
     const client = new MqttBrowserClient({
       onMessage: (topic, payload) => {
-        if (topic !== MQTT_TOPIC_TELEMETRY) return;
-        try {
-          const parsed = JSON.parse(payload);
-          lastMqttRxTimeRef.current = Date.now();
-          applyIncomingEspJson(parsed);
-        } catch {}
+        if (topic === MQTT_TOPIC_TELEMETRY) {
+          // Device lain (HP/laptop tanpa USB) langsung menerima data sensor live dari laptop USB bridge
+          if (isSerialConnectedRef.current) return;
+          try {
+            const parsed = JSON.parse(payload);
+            lastMqttRxTimeRef.current = Date.now();
+            applyIncomingEspJson(parsed);
+          } catch {}
+        } else if (topic === MQTT_TOPIC_CMD) {
+          // Laptop yang terhubung USB langsung meneruskan perintah dari HP/device lain ke ESP32 (0ms lag!)
+          if (!isSerialConnectedRef.current) return;
+          const cmd = payload.trim();
+          if (!cmd) return;
+          const lastLocal = lastLocalCmdSentRef.current;
+          if (lastLocal.cmd === cmd && Date.now() - lastLocal.ts < 500) return;
+          setSerialLogs((prev) => [...prev.slice(-140), `>>> [REMOTE HP] ${cmd}`]);
+          writeToSerialPort(cmd);
+        }
       },
     });
 
@@ -1214,7 +1241,7 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
         mqttClientRef.current = null;
       }
     };
-  }, [isLiveIoTMode, applyIncomingEspJson]);
+  }, [isLiveIoTMode, applyIncomingEspJson, writeToSerialPort]);
 
   // ==========================================================
   // POLLING TELEMETRI DARI /api/iot/telemetry

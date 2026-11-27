@@ -60,11 +60,11 @@ function buildSubscribePacket(packetId: number, topic: string): Uint8Array {
   return concatBytes([new Uint8Array([0x82, ...remLen]), varHeader, topicBytes, qos]);
 }
 
-function buildPublishPacket(topic: string, payloadStr: string): Uint8Array {
+function buildPublishPacket(topic: string, payloadStr: string, retain = false): Uint8Array {
   const topicBytes = encodeUtf8String(topic);
   const payloadBytes = textEncoder.encode(payloadStr);
   const remLen = encodeVarInt(topicBytes.length + payloadBytes.length);
-  return concatBytes([new Uint8Array([0x30, ...remLen]), topicBytes, payloadBytes]);
+  return concatBytes([new Uint8Array([retain ? 0x31 : 0x30, ...remLen]), topicBytes, payloadBytes]);
 }
 
 class SingleBrokerConnection {
@@ -172,6 +172,7 @@ class SingleBrokerConnection {
         this.onState();
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
           this.ws.send(buildSubscribePacket(1, MQTT_TOPIC_TELEMETRY));
+          this.ws.send(buildSubscribePacket(2, MQTT_TOPIC_CMD));
         }
         this.startPing();
       } else if (pktType === 0xd0) {
@@ -200,7 +201,19 @@ class SingleBrokerConnection {
       return false;
     }
     try {
-      this.ws.send(buildPublishPacket(MQTT_TOPIC_CMD, cmd));
+      this.ws.send(buildPublishPacket(MQTT_TOPIC_CMD, cmd, false));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  public publishTelemetry(jsonPayload: string): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.isConnected) {
+      return false;
+    }
+    try {
+      this.ws.send(buildPublishPacket(MQTT_TOPIC_TELEMETRY, jsonPayload, true));
       return true;
     } catch {
       return false;
@@ -318,6 +331,14 @@ export class MqttBrowserClient {
     }
     if (!sent) {
       for (const c of this.conns) c.ensureAlive();
+    }
+    return sent;
+  }
+
+  public publishTelemetry(jsonPayload: string): boolean {
+    let sent = false;
+    for (const c of this.conns) {
+      if (c.publishTelemetry(jsonPayload)) sent = true;
     }
     return sent;
   }
