@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { Volume2, VolumeX, Moon, Sun, Radio } from 'lucide-react';
 import { useSmartCity } from '@/context/SmartCityContext';
 import { SubsystemType } from '@/types/iot';
 
@@ -38,9 +39,9 @@ export const Topbar: React.FC = () => {
   return (
     <>
       <header className="sticky top-0 z-30 w-full bg-[var(--bg-panel)] border-b border-[var(--border-line)]">
-        <div className="max-w-7xl mx-auto min-h-13 px-2.5 sm:px-6 py-1.5 flex items-center justify-between gap-1.5 sm:gap-3">
+        <div className="max-w-7xl mx-auto min-h-13 px-3 sm:px-6 py-2 flex items-center justify-between gap-2 sm:gap-3">
           {/* Left: Brand Identity & Hardware Port Status */}
-          <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0">
+          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
             <button
               type="button"
               onClick={() => setActiveSubsystem('overview')}
@@ -86,7 +87,10 @@ export const Topbar: React.FC = () => {
                       : 'var(--text-secondary)',
                 }}
               />
-              <span>
+              <span className="sm:hidden">
+                {isSerialConnected ? 'USB' : isHardwareConnected ? 'WIFI' : 'SIM'}
+              </span>
+              <span className="hidden sm:inline">
                 {isSerialConnected
                   ? 'USB AKTIF'
                   : isHardwareConnected
@@ -103,7 +107,7 @@ export const Topbar: React.FC = () => {
                 className={`hidden sm:inline-flex ctrl-btn ctrl-btn-sm font-mono ${
                   isSerialConnected ? 'ctrl-btn-red' : 'ctrl-btn-green'
                 }`}
-                title="Hubungkan ESP32 langsung lewat kabel USB (COM3) dari browser"
+                title="Hubungkan ESP32 langsung lewat kabel USB dari browser"
               >
                 <span>
                   {isConnectingSerial
@@ -151,52 +155,66 @@ export const Topbar: React.FC = () => {
             })}
           </nav>
 
-          {/* Right: Compact Utility Bar (Fits Mobile & Desktop without Overflow) */}
-          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+          {/* Right: Compact Utility Bar (Clean Icon Buttons on Mobile, Full Labels on Desktop) */}
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               onClick={toggleLiveIoTMode}
-              className={`ctrl-btn ctrl-btn-sm font-mono !px-2 sm:!px-2.5 ${
+              className={`ctrl-btn ctrl-btn-sm font-mono !min-w-[38px] !px-2 sm:!px-2.5 ${
                 isLiveIoTMode ? 'ctrl-btn-green' : ''
               }`}
               title={isLiveIoTMode ? 'Sinkronisasi telemetri aktif' : 'Sinkronisasi telemetri dijeda'}
+              aria-label={isLiveIoTMode ? 'Sinkronisasi aktif' : 'Sinkronisasi dijeda'}
             >
+              <Radio className="w-3.5 h-3.5 sm:hidden shrink-0" />
               <span
-                className="w-1.5 h-1.5 rounded-full shrink-0"
+                className="hidden sm:inline-block w-1.5 h-1.5 rounded-full shrink-0"
                 style={{
                   backgroundColor: isLiveIoTMode ? 'var(--sig-green-dot)' : 'var(--text-secondary)',
                 }}
               />
-              <span>{isLiveIoTMode ? 'SYNC' : 'PAUSE'}</span>
+              <span className="hidden sm:inline">{isLiveIoTMode ? 'SYNC' : 'PAUSE'}</span>
             </button>
 
             <button
               type="button"
               onClick={toggleAudioMute}
-              className={`ctrl-btn ctrl-btn-sm font-mono !px-2 sm:!px-2.5 ${
+              className={`ctrl-btn ctrl-btn-sm font-mono !min-w-[38px] !px-2 sm:!px-2.5 ${
                 !isAudioMuted ? 'ctrl-btn-active' : ''
               }`}
+              title={isAudioMuted ? 'Nyalakan suara alarm' : 'Bisukan suara alarm'}
               aria-label={isAudioMuted ? 'Nyalakan suara alarm' : 'Bisukan suara alarm'}
             >
-              <span>{isAudioMuted ? 'MUTE' : 'AUDIO'}</span>
+              {isAudioMuted ? (
+                <VolumeX className="w-3.5 h-3.5 sm:hidden shrink-0" />
+              ) : (
+                <Volume2 className="w-3.5 h-3.5 sm:hidden shrink-0" />
+              )}
+              <span className="hidden sm:inline">{isAudioMuted ? 'MUTE' : 'AUDIO'}</span>
             </button>
 
             <button
               type="button"
               onClick={toggleTheme}
-              className="ctrl-btn ctrl-btn-sm font-mono !px-2 sm:!px-2.5"
+              className="ctrl-btn ctrl-btn-sm font-mono !min-w-[38px] !px-2 sm:!px-2.5"
+              title={theme === 'light' ? 'Ganti ke tema gelap' : 'Ganti ke tema terang'}
               aria-label={theme === 'light' ? 'Ganti ke tema gelap' : 'Ganti ke tema terang'}
             >
-              <span>{theme === 'light' ? 'GELAP' : 'TERANG'}</span>
+              {theme === 'light' ? (
+                <Moon className="w-3.5 h-3.5 sm:hidden shrink-0" />
+              ) : (
+                <Sun className="w-3.5 h-3.5 sm:hidden shrink-0" />
+              )}
+              <span className="hidden sm:inline">{theme === 'light' ? 'GELAP' : 'TERANG'}</span>
             </button>
           </div>
         </div>
       </header>
 
-      {/* Mobile Bottom Dock (Proportional 7-column Segmented Bar) */}
+      {/* Mobile Bottom Dock (Clean Scroll-Safe Bar with 44px Tap Targets & Zero Overlap) */}
       <nav
         aria-label="Navigasi Modul Mobile"
-        className="lg:hidden fixed bottom-0 left-0 right-0 z-30 w-full max-w-[100vw] bg-[var(--bg-panel)] border-t border-[var(--border-line)] px-1 py-1.5 grid grid-cols-7 gap-0.5"
+        className="lg:hidden fixed bottom-0 left-0 right-0 z-30 w-full max-w-[100vw] bg-[var(--bg-panel)] border-t border-[var(--border-line)] px-2 pt-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))] flex items-center gap-1 overflow-x-auto"
       >
         {NAV_MODULES.map((item) => {
           const isActive = activeSubsystem === item.id;
@@ -205,7 +223,7 @@ export const Topbar: React.FC = () => {
               key={item.id}
               type="button"
               onClick={() => setActiveSubsystem(item.id)}
-              className={`flex flex-col items-center justify-center rounded-md py-1.5 px-0.5 min-h-[44px] transition-colors cursor-pointer min-w-0 ${
+              className={`flex-1 min-w-[54px] shrink-0 flex flex-col items-center justify-center rounded-md py-1.5 px-1 min-h-[44px] transition-colors cursor-pointer ${
                 isActive
                   ? 'bg-[var(--accent-bg)] text-[var(--accent-text)] border border-[var(--accent-border)] font-semibold'
                   : 'bg-transparent text-[var(--text-secondary)] border border-transparent'
@@ -214,7 +232,7 @@ export const Topbar: React.FC = () => {
               <span className="font-mono text-[10px] font-bold leading-none mb-1 opacity-80">
                 {item.code}
               </span>
-              <span className="text-[10px] sm:text-[11px] leading-none truncate max-w-full">
+              <span className="text-[10px] leading-none whitespace-nowrap">
                 {item.shortLabel}
               </span>
             </button>

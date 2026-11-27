@@ -865,7 +865,7 @@ def worker_wifi_cloud():
 # ==================================================
 # 11. BUZZER DUA FUNGSI: GAS DAN PENYEBERANGAN
 # ==================================================
-INTERVAL_GAS = 800
+INTERVAL_GAS = 1000
 WAKTU_GANTI_MODE = 2500
 
 POLA_SEBERANG = [
@@ -919,8 +919,9 @@ def update_buzzer(alarm_gas, alarm_seberang, sekarang):
         mode_gas = False
 
     if mode_gas:
-        fase = sekarang % INTERVAL_GAS
-        if fase < 100 or 150 <= fase < 250:
+        # Mulai langsung dengan bunyi nyaring 250ms ON -> 150ms OFF -> 250ms ON -> 350ms OFF
+        fase = time.ticks_diff(sekarang, waktu_awal_alarm) % INTERVAL_GAS
+        if fase < 250 or 400 <= fase < 650:
             buzzer.on()
         else:
             buzzer.off()
@@ -1069,6 +1070,10 @@ while True:
         kirim_segera = True
         cloud_kirim_segera = True
 
+    # Reset mute otomatis saat udara kembali normal agar alarm berikutnya tetap bunyi
+    if nilai_gas < (BATAS_GAS - 100) and buzzer_muted:
+        buzzer_muted = False
+
     alarm_gas = (nilai_gas >= BATAS_GAS) and (not buzzer_muted)
 
     # Refresh LCD hanya tiap 350ms dan hanya jika teks berubah (mencegah flicker I2C)
@@ -1206,6 +1211,7 @@ while True:
     telemetri_terbaru["gas"] = nilai_gas
     telemetri_terbaru["gasMode"] = gas_override_mode
     telemetri_terbaru["statusPolusi"] = status_polusi
+    telemetri_terbaru["alarmGas"] = alarm_gas
     telemetri_terbaru["touchKanan"] = touch_kanan_aktif
     telemetri_terbaru["touchKiri"] = touch_kiri_aktif
     telemetri_terbaru["lampu"] = fase_penyeberangan

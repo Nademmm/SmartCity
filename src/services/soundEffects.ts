@@ -80,10 +80,28 @@ class SoundManager {
     }, 200);
   }
 
+  private pendingSirenUnlock = false;
+
   // Sirine Darurat Menggunakan File ninuninu.ogg
   public startPollutionAlarm() {
     if (this.isMuted || this.isSirenRunning) return;
     this.isSirenRunning = true;
+
+    const armUnlockRetry = () => {
+      if (this.pendingSirenUnlock || typeof window === 'undefined') return;
+      this.pendingSirenUnlock = true;
+      const retry = () => {
+        this.pendingSirenUnlock = false;
+        window.removeEventListener('pointerdown', retry);
+        window.removeEventListener('keydown', retry);
+        if (this.isSirenRunning && !this.isMuted) {
+          this.isSirenRunning = false;
+          this.startPollutionAlarm();
+        }
+      };
+      window.addEventListener('pointerdown', retry, { once: true });
+      window.addEventListener('keydown', retry, { once: true });
+    };
 
     // 1. Putar audio ninuninu.ogg
     if (typeof window !== 'undefined') {
@@ -97,19 +115,24 @@ class SoundManager {
         this.alarmAudio.muted = this.isMuted;
         const playPromise = this.alarmAudio.play();
         if (playPromise !== undefined) {
-          playPromise.catch((err) => {
-            console.warn('Audio ninuninu.ogg playback fallback to oscillator:', err);
+          playPromise.catch(() => {
             this.startSynthesizedSiren();
+            if (!this.ctx || this.ctx.state === 'suspended') {
+              armUnlockRetry();
+            }
           });
         }
         return;
-      } catch (err) {
-        console.warn('Audio tag failed, fallback to oscillator:', err);
+      } catch {
+        // Fallback ke Web Audio Synthesizer
       }
     }
 
     // 2. Fallback Web Audio Synthesizer jika Audio element gagal
     this.startSynthesizedSiren();
+    if (!this.ctx || this.ctx.state === 'suspended') {
+      armUnlockRetry();
+    }
   }
 
   private startSynthesizedSiren() {
