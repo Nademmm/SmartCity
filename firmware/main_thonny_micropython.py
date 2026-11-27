@@ -30,18 +30,19 @@ except Exception:
 # - Portal Wi-Fi Cadangan ESP32: hubungkan HP ke "SmartCity-ESP32-Setup"
 #   (sandi: 12345678) lalu buka http://192.168.4.1
 WIFI_DEFAULT_LIST = [
-    # ("NAMA_WIFI_ATAU_HOTSPOT_HP", "PASSWORD_WIFI"),
+    ("Dedem", "NNN12814"),
 ]
 
 WIFI_CONFIG_FILE = "wifi_config.json"
 AP_SSID = "SmartCity-ESP32-Setup"
 AP_PASS = "12345678"
 
-CLOUD_HOST = "smartcity-esp32.vercel.app"
-CLOUD_PORT = 443
-CLOUD_PATH = "/api/iot/telemetry"
+CLOUD_HOST = "broker.emqx.io"
+CLOUD_PORT = 1883
+MQTT_TOPIC_TELEMETRY = "urbanpulse/smartcity-esp32-nadem-2026/telemetry"
+MQTT_TOPIC_CMD = "urbanpulse/smartcity-esp32-nadem-2026/cmd"
 DEVICE_ID = "ESP32-MINIATURE"
-INTERVAL_CLOUD_MS = 1200
+INTERVAL_CLOUD_MS = 500
 
 # ==================================================
 # 1. LCD I2C (AUTO-DETEKSI SCL & SDA)
@@ -166,6 +167,7 @@ cloud_kirim_segera = True
 wifi_terhubung = False
 wifi_ssid_aktif = ""
 wifi_ip_aktif = ""
+wifi_pesan_terakhir = "Belum ada Wi-Fi tersimpan"
 wifi_reconnect_flag = False
 lcd_pesan_sementara_sampai = 0
 lcd_pesan_baris1 = ""
@@ -421,78 +423,119 @@ def cek_perintah_jaringan():
 
 
 # ==================================================
-# 10. WORKER WIFI + PORTAL SETUP AP + HTTPS CLOUD SYNC
+# 10. WORKER WIFI + PORTAL SETUP AP + MQTT REAL-TIME CLOUD SYNC
 # ==================================================
-def kirim_https_post_cloud(body_str):
-    if ssl is None:
-        return None
-    raw_sock = None
-    tls_sock = None
+def mqtt_encode_varint(n):
+    out = bytearray()
+    while True:
+        digit = n % 128
+        n //= 128
+        if n > 0:
+            digit |= 0x80
+        out.append(digit)
+        if n == 0:
+            break
+    return bytes(out)
+
+
+def mqtt_encode_str(s):
+    b = s.encode("utf-8")
+    return len(b).to_bytes(2, "big") + b
+
+
+def mqtt_buka_koneksi():
+    sock = None
     try:
         gc.collect()
-        addr = socket.getaddrinfo(CLOUD_HOST, CLOUD_PORT)[0][-1]
-        raw_sock = socket.socket()
-        raw_sock.settimeout(6)
-        raw_sock.connect(addr)
-        try:
-            tls_sock = ssl.wrap_socket(raw_sock, server_hostname=CLOUD_HOST)
-        except TypeError:
-            tls_sock = ssl.wrap_socket(raw_sock)
+        addr = socket.getaddrinfo(CLOUD_HOST, CLOUD_PORT, socket.AF_INET)[0][-1]
+        sock = socket.socket()
+        sock.settimeout(5)
+        sock.connect(addr)
 
-        body_bytes = body_str.encode("utf-8")
-        req = (
-            "POST " + CLOUD_PATH + " HTTP/1.1\r\n"
-            "Host: " + CLOUD_HOST + "\r\n"
-            "User-Agent: ESP32-SmartCity\r\n"
-            "Content-Type: application/json\r\n"
-            "Content-Length: " + str(len(body_bytes)) + "\r\n"
-            "Connection: close\r\n\r\n"
-        ).encode("utf-8")
+        # MQTT 3.1.1 CONNECT (Clean Session, KeepAlive 60s)
+        cid = "esp32_sc_" + str(time.ticks_ms() % 100000)
+        vh = b"\x00\x04MQTT\x04\x02\x00\x3c"
+        pl = mqtt_encode_str(cid)
+        pkt = b"\x10" + mqtt_encode_varint(len(vh) + len(pl)) + vh + pl
+        sock.send(pkt)
+        ack = sock.recv(4)
+        if len(ack) < 4 or ack[0] != 0x20 or ack[3] != 0x00:
+            raise OSError("MQTT CONNACK invalid")
 
-        tls_sock.write(req)
-        tls_sock.write(body_bytes)
-
-        chunks = []
-        total_len = 0
-        while total_len < 8192:
-            data = tls_sock.read(512)
-            if not data:
-                break
-            chunks.append(data)
-            total_len += len(data)
-
-        resp_raw = b"".join(chunks).decode("utf-8", "ignore")
-        sep = resp_raw.find("\r\n\r\n")
-        if sep == -1:
-            return None
-        body_resp = resp_raw[sep + 4:]
-        j_start = body_resp.find("{")
-        j_end = body_resp.rfind("}")
-        if j_start != -1 and j_end > j_start:
-            return ujson.loads(body_resp[j_start:j_end + 1])
-        return None
+        # SUBSCRIBE ke topik perintah kontrol dari Web Dashboard
+        sub_vh = b"\x00\x01"
+        sub_pl = mqtt_encode_str(MQTT_TOPIC_CMD) + b"\x00"
+        sub_pkt = b"\x82" + mqtt_encode_varint(len(sub_vh) + len(sub_pl)) + sub_vh + sub_pl
+        sock.send(sub_pkt)
+        sock.settimeout(0.08)
+        print("[CLOUD OK] MQTT Real-Time terhubung ke", CLOUD_HOST)
+        return sock
     except Exception as e:
         print("[CLOUD ERR]", e)
+        try:
+            if sock is not None:
+                sock.close()
+        except Exception:
+            pass
         return None
-    finally:
-        try:
-            if tls_sock is not None:
-                tls_sock.close()
-        except Exception:
-            pass
-        try:
-            if raw_sock is not None:
-                raw_sock.close()
-        except Exception:
-            pass
-        gc.collect()
+
+
+def mqtt_publish_json(sock, topic, payload_str):
+    tb = mqtt_encode_str(topic)
+    pb = payload_str.encode("utf-8")
+    pkt = b"\x30" + mqtt_encode_varint(len(tb) + len(pb)) + tb + pb
+    sock.send(pkt)
+
+
+def mqtt_proses_masuk(sock, buf):
+    try:
+        chunk = sock.recv(512)
+        if chunk == b"":
+            return None, False
+        if chunk:
+            buf += chunk
+    except OSError:
+        # Timeout 80ms normal saat tidak ada pesan baru
+        pass
+
+    while len(buf) >= 2:
+        hdr = buf[0]
+        mult = 1
+        rem_len = 0
+        idx = 1
+        lengkap = False
+        while idx < len(buf) and idx <= 4:
+            b = buf[idx]
+            rem_len += (b & 0x7F) * mult
+            idx += 1
+            if (b & 0x80) == 0:
+                lengkap = True
+                break
+            mult *= 128
+        if not lengkap or len(buf) < idx + rem_len:
+            break
+
+        body = buf[idx:idx + rem_len]
+        buf = buf[idx + rem_len:]
+
+        if (hdr & 0xF0) == 0x30 and len(body) >= 2:
+            tlen = (body[0] << 8) | body[1]
+            qos = (hdr >> 1) & 0x03
+            pstart = 2 + tlen + (2 if qos > 0 else 0)
+            if pstart <= len(body):
+                cmd_str = body[pstart:].decode("utf-8", "ignore").strip()
+                if cmd_str:
+                    eksekusi_perintah(cmd_str)
+
+    return buf, True
 
 
 def hubungkan_wifi_sta(sta, daftar_wifi):
-    global wifi_terhubung, wifi_ssid_aktif, wifi_ip_aktif
+    global wifi_terhubung, wifi_ssid_aktif, wifi_ip_aktif, wifi_pesan_terakhir
 
     sta.active(True)
     if not daftar_wifi:
+        wifi_pesan_terakhir = "Belum ada Wi-Fi tersimpan"
         return False
 
     for ssid, pwd in daftar_wifi:
@@ -507,10 +550,11 @@ def hubungkan_wifi_sta(sta, daftar_wifi):
             sta.connect(ssid, pwd)
         except Exception as e:
             print("[WIFI CONN ERR]", e)
+            wifi_pesan_terakhir = "Gagal mulai koneksi ke " + ssid
             continue
 
         t0 = time.ticks_ms()
-        while not sta.isconnected() and time.ticks_diff(time.ticks_ms(), t0) < 10000:
+        while not sta.isconnected() and time.ticks_diff(time.ticks_ms(), t0) < 11000:
             if wifi_reconnect_flag:
                 return False
             time.sleep_ms(250)
@@ -519,14 +563,48 @@ def hubungkan_wifi_sta(sta, daftar_wifi):
             wifi_terhubung = True
             wifi_ssid_aktif = ssid
             wifi_ip_aktif = sta.ifconfig()[0]
+            wifi_pesan_terakhir = "Terhubung ke " + ssid + " (" + wifi_ip_aktif + ")"
             print("[WIFI OK] Terhubung ke {} | IP: {}".format(ssid, wifi_ip_aktif))
             tampilkan_pesan_lcd("WIFI TERHUBUNG", wifi_ip_aktif, 3000)
             return True
+        else:
+            wifi_pesan_terakhir = "Gagal terhubung ke " + ssid + " (cek sandi / pastikan 2.4 GHz)"
 
     wifi_terhubung = False
     wifi_ssid_aktif = ""
     wifi_ip_aktif = ""
     return False
+
+
+def scan_wifi_terdekat(sta):
+    hasil = []
+    sudah = set()
+    try:
+        sta.active(True)
+        raw_nets = sta.scan()
+        raw_nets.sort(key=lambda x: x[3], reverse=True)
+        for item in raw_nets:
+            nama = item[0].decode("utf-8", "ignore").strip()
+            rssi = item[3]
+            if nama and nama != AP_SSID and nama not in sudah:
+                sudah.add(nama)
+                hasil.append((nama, rssi))
+                if len(hasil) >= 10:
+                    break
+    except Exception as e:
+        print("[WIFI SCAN ERR]", e)
+    return hasil
+
+
+def escape_html(text):
+    return (
+        str(text)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#39;")
+    )
 
 
 def jalankan_portal_setup_ap(ap, sta):
@@ -536,25 +614,30 @@ def jalankan_portal_setup_ap(ap, sta):
         ap.config(essid=AP_SSID, password=AP_PASS, authmode=3)
     except Exception:
         try:
-            ap.config(essid=AP_SSID)
+            ap.config(ssid=AP_SSID, key=AP_PASS, security=3)
         except Exception:
-            pass
+            try:
+                ap.config(essid=AP_SSID)
+            except Exception:
+                pass
 
     print("[WIFI AP] Mode Setup Aktif! Hubungkan HP ke '{}' (sandi: {}) lalu buka http://192.168.4.1".format(AP_SSID, AP_PASS))
-    tampilkan_pesan_lcd("AP:SmartCity", "192.168.4.1", 4000)
+    tampilkan_pesan_lcd("AP:SmartCity", "192.168.4.1", 5000)
+
+    daftar_scan = scan_wifi_terdekat(sta)
 
     srv = None
     try:
         srv = socket.socket()
         srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         srv.bind(("0.0.0.0", 80))
-        srv.listen(2)
+        srv.listen(3)
         srv.settimeout(0.5)
 
         t_retry = time.ticks_ms()
         while not wifi_reconnect_flag:
-            # Coba ulang Wi-Fi tersimpan setiap 25 detik jika ada
-            if time.ticks_diff(time.ticks_ms(), t_retry) >= 25000:
+            # Coba ulang Wi-Fi tersimpan setiap 30 detik jika ada
+            if time.ticks_diff(time.ticks_ms(), t_retry) >= 30000:
                 t_retry = time.ticks_ms()
                 daftar = muat_daftar_wifi()
                 if daftar and hubungkan_wifi_sta(sta, daftar):
@@ -568,7 +651,9 @@ def jalankan_portal_setup_ap(ap, sta):
             try:
                 conn.settimeout(2)
                 req = conn.recv(1024).decode("utf-8", "ignore")
-                if "GET /save?" in req:
+                if "GET /scan" in req:
+                    daftar_scan = scan_wifi_terdekat(sta)
+                elif "GET /save?" in req:
                     q_start = req.find("?") + 1
                     q_end = req.find(" ", q_start)
                     query = req[q_start:q_end] if q_end != -1 else req[q_start:]
@@ -582,29 +667,59 @@ def jalankan_portal_setup_ap(ap, sta):
                     if ssid_in:
                         simpan_wifi_config(ssid_in, pass_in)
                         html = (
-                            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
-                            "<html><meta name=viewport content='width=device-width,initial-scale=1'>"
-                            "<body style='font-family:sans-serif;padding:24px'>"
-                            "<h2>Wi-Fi Tersimpan!</h2><p>ESP32 sedang menghubungkan ke <b>"
-                            + ssid_in +
-                            "</b> dan akan langsung sinkron ke smartcity-esp32.vercel.app.</p></body></html>"
+                            "HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n"
+                            "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+                            "<title>SmartCity Wi-Fi Tersimpan</title></head>"
+                            "<body style='font-family:sans-serif;max-width:420px;margin:24px auto;padding:18px;background:#f8fafc;color:#0f172a'>"
+                            "<div style='background:#fff;border:1px solid #cbd5e1;border-radius:12px;padding:18px'>"
+                            "<h2 style='margin:0 0 8px;color:#15803d'>Wi-Fi Tersimpan!</h2>"
+                            "<p style='font-size:14px;line-height:1.5'>ESP32 sedang menghubungkan ke <b>"
+                            + escape_html(ssid_in) +
+                            "</b>. Tunggu 5 detik, lalu buka dashboard <b>smartcity-esp32.vercel.app</b> dan pastikan status berubah menjadi <b>WIFI AKTIF</b>.</p>"
+                            "<p style='font-size:12px;color:#64748b'>Jika gagal terhubung (salah sandi), Wi-Fi SmartCity-ESP32-Setup akan muncul kembali otomatis.</p>"
+                            "</div></body></html>"
                         )
                         conn.send(html.encode("utf-8"))
                         conn.close()
                         break
+
+                tombol_wifi = ""
+                for nama_w, rssi_w in daftar_scan:
+                    nama_esc = escape_html(nama_w)
+                    tombol_wifi += (
+                        "<button type='button' onclick=\"document.getElementById('ssid').value='"
+                        + nama_esc.replace("&#39;", "\\'")
+                        + "';document.getElementById('pass').focus();\" "
+                        "style='display:flex;justify-content:space-between;width:100%;padding:9px 11px;margin:4px 0;"
+                        "background:#f1f5f9;border:1px solid #cbd5e1;border-radius:8px;font-size:13px;cursor:pointer'>"
+                        "<span>" + nama_esc + "</span><span style='color:#64748b'>" + str(rssi_w) + " dBm</span></button>"
+                    )
+                if not tombol_wifi:
+                    tombol_wifi = "<p style='font-size:12px;color:#64748b'>Tidak ada Wi-Fi 2.4 GHz terdeteksi. Ketik manual di bawah atau klik Scan Ulang.</p>"
+
                 html = (
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
-                    "<html><meta name=viewport content='width=device-width,initial-scale=1'>"
-                    "<body style='font-family:sans-serif;max-width:420px;margin:24px auto;padding:16px'>"
-                    "<h2>SmartCity ESP32 Wi-Fi</h2>"
-                    "<p>Masukkan Wi-Fi 2.4 GHz atau Hotspot HP agar ESP32 terhubung ke dashboard tanpa kabel USB.</p>"
+                    "HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n"
+                    "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+                    "<title>Setup Wi-Fi SmartCity ESP32</title></head>"
+                    "<body style='font-family:sans-serif;max-width:440px;margin:16px auto;padding:14px;background:#f8fafc;color:#0f172a'>"
+                    "<div style='background:#fff;border:1px solid #cbd5e1;border-radius:12px;padding:16px'>"
+                    "<h2 style='margin:0 0 6px'>Setup Wi-Fi SmartCity ESP32</h2>"
+                    "<p style='font-size:12px;color:#475569;margin:0 0 12px'>Status: <b>" + escape_html(wifi_pesan_terakhir) + "</b></p>"
+                    "<div style='margin-bottom:12px'>"
+                    "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px'>"
+                    "<b style='font-size:13px'>Pilih Wi-Fi / Hotspot HP (2.4 GHz):</b>"
+                    "<a href='/scan' style='font-size:12px;color:#2563eb;text-decoration:none;font-weight:bold'>Scan Ulang</a>"
+                    "</div>" + tombol_wifi + "</div>"
                     "<form action='/save' method='get'>"
-                    "<label>Nama Wi-Fi (SSID)</label><br>"
-                    "<input name='ssid' required style='width:100%;padding:10px;margin:6px 0 14px'><br>"
-                    "<label>Password Wi-Fi</label><br>"
-                    "<input name='pass' type='password' style='width:100%;padding:10px;margin:6px 0 18px'><br>"
-                    "<button type='submit' style='width:100%;padding:12px;background:#16a34a;color:#fff;border:0;border-radius:8px;font-weight:bold'>Simpan &amp; Hubungkan</button>"
-                    "</form></body></html>"
+                    "<label style='font-size:13px;font-weight:bold'>Nama Wi-Fi (SSID)</label><br>"
+                    "<input id='ssid' name='ssid' required placeholder='Ketik atau klik Wi-Fi di atas' "
+                    "style='width:100%;box-sizing:border-box;padding:10px;margin:5px 0 12px;border:1px solid #94a3b8;border-radius:8px'><br>"
+                    "<label style='font-size:13px;font-weight:bold'>Password Wi-Fi</label><br>"
+                    "<input id='pass' name='pass' type='password' placeholder='Kosongkan jika tanpa sandi' "
+                    "style='width:100%;box-sizing:border-box;padding:10px;margin:5px 0 16px;border:1px solid #94a3b8;border-radius:8px'><br>"
+                    "<button type='submit' style='width:100%;padding:12px;background:#16a34a;color:#fff;border:0;border-radius:8px;font-size:14px;font-weight:bold;cursor:pointer'>"
+                    "Simpan &amp; Hubungkan</button>"
+                    "</form></div></body></html>"
                 )
                 conn.send(html.encode("utf-8"))
                 conn.close()
@@ -631,13 +746,22 @@ def worker_wifi_cloud():
     ap.active(False)
     sta.active(True)
 
+    mqtt_sock = None
+    mqtt_buf = b""
     waktu_cloud_terakhir = 0
+    waktu_ping_terakhir = 0
 
     while True:
         try:
             if wifi_reconnect_flag:
                 wifi_reconnect_flag = False
                 wifi_terhubung = False
+                if mqtt_sock is not None:
+                    try:
+                        mqtt_sock.close()
+                    except Exception:
+                        pass
+                    mqtt_sock = None
                 try:
                     sta.disconnect()
                 except Exception:
@@ -645,6 +769,12 @@ def worker_wifi_cloud():
 
             if not sta.isconnected():
                 wifi_terhubung = False
+                if mqtt_sock is not None:
+                    try:
+                        mqtt_sock.close()
+                    except Exception:
+                        pass
+                    mqtt_sock = None
                 daftar = muat_daftar_wifi()
                 if hubungkan_wifi_sta(sta, daftar):
                     ap.active(False)
@@ -653,52 +783,49 @@ def worker_wifi_cloud():
                     jalankan_portal_setup_ap(ap, sta)
                     continue
 
+            if mqtt_sock is None:
+                mqtt_sock = mqtt_buka_koneksi()
+                mqtt_buf = b""
+                if mqtt_sock is None:
+                    time.sleep_ms(2000)
+                    continue
+                waktu_ping_terakhir = time.ticks_ms()
+                cloud_kirim_segera = True
+
+            # 1. Baca perintah masuk dari Web Dashboard (non-blocking 80ms)
+            mqtt_buf, hidup = mqtt_proses_masuk(mqtt_sock, mqtt_buf)
+            if not hidup:
+                try:
+                    mqtt_sock.close()
+                except Exception:
+                    pass
+                mqtt_sock = None
+                continue
+
             sekarang_w = time.ticks_ms()
+
+            # 2. KeepAlive PING setiap 20 detik
+            if time.ticks_diff(sekarang_w, waktu_ping_terakhir) >= 20000:
+                waktu_ping_terakhir = sekarang_w
+                mqtt_sock.send(b"\xc0\x00")
+
+            # 3. Kirim telemetri real-time setiap 500ms atau langsung saat status berubah
             if cloud_kirim_segera or time.ticks_diff(sekarang_w, waktu_cloud_terakhir) >= INTERVAL_CLOUD_MS:
                 waktu_cloud_terakhir = sekarang_w
                 cloud_kirim_segera = False
 
                 snap = dict(telemetri_terbaru)
-                pju_on = snap["pjuStatus"] == "MENYALA"
-                paket = {
-                    "deviceId": DEVICE_ID,
-                    "type": "miniature-all",
-                    "payload": {
-                        "gas": {
-                            "gasValue": snap["gas"],
-                            "gasMode": snap["gasMode"],
-                            "statusPolusi": snap["statusPolusi"],
-                        },
-                        "crossing": {
-                            "touchKanan": snap["touchKanan"],
-                            "touchKiri": snap["touchKiri"],
-                            "lampu": snap["lampu"],
-                            "countdown": snap["countdown"],
-                            "buzzer": snap["buzzerSeberang"],
-                            "siapMenyeberang": snap["lampu"] == "NORMAL",
-                        },
-                        "pju": {
-                            "ldrValue": snap["ldr"],
-                            "kondisi": snap["kondisi"],
-                            "pjuStatus": snap["pjuStatus"],
-                            "pjuMode": snap["pjuMode"],
-                            "ledMerah": pju_on,
-                            "ledPutih": pju_on,
-                        },
-                    },
-                }
+                mqtt_publish_json(mqtt_sock, MQTT_TOPIC_TELEMETRY, ujson.dumps(snap))
 
-                resp = kirim_https_post_cloud(ujson.dumps(paket))
-                if isinstance(resp, dict):
-                    cmds = resp.get("commands", [])
-                    if isinstance(cmds, list):
-                        for item in cmds:
-                            if isinstance(item, dict) and item.get("action"):
-                                eksekusi_perintah(str(item.get("action")))
-
-            time.sleep_ms(120)
+            time.sleep_ms(40)
         except Exception as err:
             print("[WIFI LOOP ERR]", err)
+            if mqtt_sock is not None:
+                try:
+                    mqtt_sock.close()
+                except Exception:
+                    pass
+                mqtt_sock = None
             time.sleep_ms(1000)
 
 

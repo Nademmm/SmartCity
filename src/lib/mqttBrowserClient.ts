@@ -1,0 +1,238 @@
+// Lightweight zero-dependency MQTT 3.1.1 over Secure WebSocket (WSS) client
+// Menghubungkan dashboard browser (HP/Laptop di jaringan mana pun) langsung ke ESP32 via broker MQTT
+
+export const MQTT_WSS_URL = 'wss://broker.emqx.io:8084/mqtt';
+export const MQTT_TOPIC_TELEMETRY = 'urbanpulse/smartcity-esp32-nadem-2026/telemetry';
+export const MQTT_TOPIC_CMD = 'urbanpulse/smartcity-esp32-nadem-2026/cmd';
+
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+
+function encodeVarInt(len: number): number[] {
+  const bytes: number[] = [];
+  let x = len;
+  do {
+    let digit = x % 128;
+    x = Math.floor(x / 128);
+    if (x > 0) digit |= 0x80;
+    bytes.push(digit);
+  } while (x > 0);
+  return bytes;
+}
+
+function encodeUtf8String(str: string): Uint8Array {
+  const encoded = textEncoder.encode(str);
+  const out = new Uint8Array(2 + encoded.length);
+  out[0] = (encoded.length >> 8) & 0xff;
+  out[1] = encoded.length & 0xff;
+  out.set(encoded, 2);
+  return out;
+}
+
+function concatBytes(parts: Uint8Array[]): Uint8Array {
+  let total = 0;
+  for (const p of parts) total += p.length;
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const p of parts) {
+    out.set(p, offset);
+    offset += p.length;
+  }
+  return out;
+}
+
+function buildConnectPacket(clientId: string): Uint8Array {
+  const varHeader = new Uint8Array([0x00, 0x04, 0x4d, 0x51, 0x54, 0x54, 0x04, 0x02, 0x00, 0x3c]);
+  const payload = encodeUtf8String(clientId);
+  const remLen = encodeVarInt(varHeader.length + payload.length);
+  return concatBytes([new Uint8Array([0x10, ...remLen]), varHeader, payload]);
+}
+
+function buildSubscribePacket(packetId: number, topic: string): Uint8Array {
+  const varHeader = new Uint8Array([(packetId >> 8) & 0xff, packetId & 0xff]);
+  const topicBytes = encodeUtf8String(topic);
+  const qos = new Uint8Array([0x00]);
+  const remLen = encodeVarInt(varHeader.length + topicBytes.length + qos.length);
+  return concatBytes([new Uint8Array([0x82, ...remLen]), varHeader, topicBytes, qos]);
+}
+
+function buildPublishPacket(topic: string, payloadStr: string): Uint8Array {
+  const topicBytes = encodeUtf8String(topic);
+  const payloadBytes = textEncoder.encode(payloadStr);
+  const remLen = encodeVarInt(topicBytes.length + payloadBytes.length);
+  return concatBytes([new Uint8Array([0x30, ...remLen]), topicBytes, payloadBytes]);
+}
+
+export interface MqttBrowserClientOptions {
+  onMessage: (topic: string, payload: string) => void;
+  onStatusChange?: (connected: boolean) => void;
+}
+
+export class MqttBrowserClient {
+  private ws: WebSocket | null = null;
+  private closed = false;
+  private isConnected = false;
+  private pingTimer: ReturnType<typeof setInterval> | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private recvBuf: Uint8Array = new Uint8Array(0);
+  private options: MqttBrowserClientOptions;
+
+  constructor(options: MqttBrowserClientOptions) {
+    this.options = options;
+  }
+
+  public connect(): void {
+    if (this.closed || typeof window === 'undefined') return;
+    this.cleanupSocket();
+
+    try {
+      const ws = new WebSocket(MQTT_WSS_URL, ['mqtt']);
+      ws.binaryType = 'arraybuffer';
+      this.ws = ws;
+
+      ws.onopen = () => {
+        if (this.closed || this.ws !== ws) return;
+        const cid = `sc_web_${Math.random().toString(36).slice(2, 10)}`;
+        ws.send(buildConnectPacket(cid));
+      };
+
+      ws.onmessage = (ev: MessageEvent) => {
+        if (this.closed || this.ws !== ws) return;
+        if (!(ev.data instanceof ArrayBuffer)) return;
+        const incoming = new Uint8Array(ev.data);
+        this.recvBuf = concatBytes([this.recvBuf, incoming]);
+        this.processBuffer();
+      };
+
+      ws.onerror = () => {
+        // Ditangani otomatis di onclose
+      };
+
+      ws.onclose = () => {
+        if (this.isConnected) {
+          this.isConnected = false;
+          this.options.onStatusChange?.(false);
+        }
+        this.stopPing();
+        if (!this.closed) {
+          this.scheduleReconnect();
+        }
+      };
+    } catch {
+      this.scheduleReconnect();
+    }
+  }
+
+  private processBuffer(): void {
+    while (this.recvBuf.length >= 2) {
+      const header = this.recvBuf[0];
+      let mult = 1;
+      let remLen = 0;
+      let idx = 1;
+      let completeVarInt = false;
+
+      while (idx < this.recvBuf.length && idx <= 4) {
+        const byte = this.recvBuf[idx];
+        remLen += (byte & 0x7f) * mult;
+        idx++;
+        if ((byte & 0x80) === 0) {
+          completeVarInt = true;
+          break;
+        }
+        mult *= 128;
+      }
+
+      if (!completeVarInt) return;
+      const totalLen = idx + remLen;
+      if (this.recvBuf.length < totalLen) return;
+
+      const packetBody = this.recvBuf.slice(idx, totalLen);
+      this.recvBuf = this.recvBuf.slice(totalLen);
+
+      const pktType = header & 0xf0;
+      if (pktType === 0x20 && packetBody.length >= 2 && packetBody[1] === 0x00) {
+        // CONNACK OK
+        this.isConnected = true;
+        this.options.onStatusChange?.(true);
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+          this.ws.send(buildSubscribePacket(1, MQTT_TOPIC_TELEMETRY));
+        }
+        this.startPing();
+      } else if (pktType === 0x30 && packetBody.length >= 2) {
+        // PUBLISH
+        const topicLen = (packetBody[0] << 8) | packetBody[1];
+        if (2 + topicLen <= packetBody.length) {
+          const topic = textDecoder.decode(packetBody.slice(2, 2 + topicLen));
+          const qos = (header >> 1) & 0x03;
+          const payloadStart = 2 + topicLen + (qos > 0 ? 2 : 0);
+          if (payloadStart <= packetBody.length) {
+            const payload = textDecoder.decode(packetBody.slice(payloadStart));
+            this.options.onMessage(topic, payload);
+          }
+        }
+      }
+    }
+  }
+
+  public publishCommand(cmd: string): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.isConnected) {
+      return false;
+    }
+    try {
+      this.ws.send(buildPublishPacket(MQTT_TOPIC_CMD, cmd));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private startPing(): void {
+    this.stopPing();
+    this.pingTimer = setInterval(() => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        try {
+          this.ws.send(new Uint8Array([0xc0, 0x00]));
+        } catch {}
+      }
+    }, 25000);
+  }
+
+  private stopPing(): void {
+    if (this.pingTimer) {
+      clearInterval(this.pingTimer);
+      this.pingTimer = null;
+    }
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer || this.closed) return;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, 3000);
+  }
+
+  private cleanupSocket(): void {
+    this.stopPing();
+    if (this.ws) {
+      try {
+        this.ws.onclose = null;
+        this.ws.onmessage = null;
+        this.ws.onerror = null;
+        this.ws.onopen = null;
+        this.ws.close();
+      } catch {}
+      this.ws = null;
+    }
+    this.recvBuf = new Uint8Array(0);
+  }
+
+  public disconnect(): void {
+    this.closed = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.cleanupSocket();
+  }
+}

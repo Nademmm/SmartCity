@@ -26,6 +26,7 @@ import {
   INITIAL_LOGS,
 } from '@/services/iotSimulationEngine';
 import { sounds } from '@/services/soundEffects';
+import { MqttBrowserClient, MQTT_TOPIC_TELEMETRY } from '@/lib/mqttBrowserClient';
 
 function formatLcdLine1(gasVal: number): string {
   return `Nilai MQ: ${String(gasVal).padStart(4, ' ')}  `;
@@ -203,6 +204,8 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   const writerRef = useRef<any>(null);
   const keepReadingRef = useRef<boolean>(false);
   const lastSerialCloudSyncRef = useRef<number>(0);
+  const mqttClientRef = useRef<MqttBrowserClient | null>(null);
+  const lastMqttRxTimeRef = useRef<number>(0);
 
   // Command lock timestamps
   const lastGasCmdTimeRef = useRef<number>(0);
@@ -314,8 +317,13 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
       const formatted = action.trim().startsWith('CMD:') ? action.trim() : `CMD:${action.trim()}`;
       setSerialLogs((prev) => [...prev.slice(-140), `>>> PERINTAH DIKIRIM: ${formatted}`]);
 
+      // 1. Kirim langsung lewat MQTT Cloud (real-time ke ESP32 Wi-Fi di jaringan mana pun)
+      mqttClientRef.current?.publishCommand(formatted);
+
+      // 2. Kirim langsung lewat USB Web Serial jika sedang terpasang
       await writeToSerialPort(formatted);
 
+      // 3. Cadangan lewat HTTP API Vercel
       try {
         await Promise.allSettled([
           fetch('/api/iot/telemetry', {
@@ -1181,6 +1189,34 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
   }, [isSimulating, isHardwareConnected, isSerialConnected]);
 
   // ==========================================================
+  // KONEKSI REAL-TIME MQTT OVER WSS (ESP32 WIFI <-> HP/LAPTOP MANA PUN)
+  // ==========================================================
+  useEffect(() => {
+    if (!isLiveIoTMode) return;
+
+    const client = new MqttBrowserClient({
+      onMessage: (topic, payload) => {
+        if (topic !== MQTT_TOPIC_TELEMETRY) return;
+        try {
+          const parsed = JSON.parse(payload);
+          lastMqttRxTimeRef.current = Date.now();
+          applyIncomingEspJson(parsed);
+        } catch {}
+      },
+    });
+
+    mqttClientRef.current = client;
+    client.connect();
+
+    return () => {
+      client.disconnect();
+      if (mqttClientRef.current === client) {
+        mqttClientRef.current = null;
+      }
+    };
+  }, [isLiveIoTMode, applyIncomingEspJson]);
+
+  // ==========================================================
   // POLLING TELEMETRI DARI /api/iot/telemetry
   // ==========================================================
   useEffect(() => {
@@ -1197,7 +1233,8 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
         if (!isMounted || !data.latestBySubsystem) return;
 
         const now = Date.now();
-        let espDataFresh = isSerialConnected;
+        const mqttFresh = now - lastMqttRxTimeRef.current < 8000;
+        let espDataFresh = isSerialConnected || mqttFresh;
         let camDataFresh = false;
 
         // 1. Traffic Data
