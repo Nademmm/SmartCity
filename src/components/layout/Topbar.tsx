@@ -90,7 +90,7 @@ export const Topbar: React.FC = () => {
                 {isSerialConnected
                   ? 'USB AKTIF'
                   : isHardwareConnected
-                  ? 'ONLINE'
+                  ? 'WIFI AKTIF'
                   : 'SIMULASI'}
               </span>
             </div>

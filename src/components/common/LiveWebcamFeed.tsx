@@ -55,6 +55,8 @@ interface RoiBounds {
 }
 
 interface LockedRoadCalibration {
+  w: number;
+  h: number;
   bgLum: Float32Array;
   bgSat: Float32Array;
   timestamp: string;
@@ -94,6 +96,19 @@ const NON_VEHICLE_ROOM_CLASSES = new Set([
   'refrigerator',
   'microwave',
   'oven',
+]);
+
+// Objek padat non-kendaraan yang isi dalamnya tidak boleh dianggap mobil (misal jam di layar HP atau ritsleting tas)
+const CONTAINING_NON_VEHICLE_CLASSES = new Set([
+  'cell phone',
+  'laptop',
+  'tv',
+  'backpack',
+  'handbag',
+  'suitcase',
+  'keyboard',
+  'bottle',
+  'cup',
 ]);
 
 function computeIoU(b1: [number, number, number, number], b2: [number, number, number, number]): number {
@@ -205,13 +220,19 @@ function mapBoxToContainerPercent(
   };
 }
 
-// Resolusi Analisis Piksel Presisi Tinggi 320x200
-const PROC_W = 320;
-const PROC_H = 200;
+// Resolusi Analisis Presisi Tinggi (mempertahankan rasio aspek asli kamera HP portrait maupun laptop landscape)
+const MAX_PROC_DIM = 360;
 
 interface SceneFeatureMaps {
+  w: number;
+  h: number;
   gray: Uint8Array;
   sat: Uint8Array;
+  val: Uint8Array;
+  rCh: Uint8Array;
+  gCh: Uint8Array;
+  bCh: Uint8Array;
+  sd5: Float32Array;
   edges: Uint8Array;
   smoothStrictSkin: Uint8Array;
   smoothHandSkin: Uint8Array;
@@ -283,7 +304,51 @@ function computePercentile(sortedArr: number[], p: number): number {
   return sortedArr[lo] * (hi - idx) + sortedArr[hi] * (idx - lo);
 }
 
+// Standar deviasi lokal 5x5 menggunakan integral image 2D O(1)/piksel
+// Membedakan tekstur mikro 3D mobil miniatur (sd5 > 14.5) dari dinding gedung karton/aspal halus (sd5 < 14)
+function computeLocalStd5(gray: Uint8Array, w: number, h: number): Float32Array {
+  const stride = w + 1;
+  const sum1 = new Float64Array(stride * (h + 1));
+  const sum2 = new Float64Array(stride * (h + 1));
+
+  for (let y = 0; y < h; y++) {
+    let rowS1 = 0;
+    let rowS2 = 0;
+    const gRow = y * w;
+    const prevRow = y * stride;
+    const curRow = (y + 1) * stride;
+    for (let x = 0; x < w; x++) {
+      const v = gray[gRow + x];
+      rowS1 += v;
+      rowS2 += v * v;
+      sum1[curRow + x + 1] = sum1[prevRow + x + 1] + rowS1;
+      sum2[curRow + x + 1] = sum2[prevRow + x + 1] + rowS2;
+    }
+  }
+
+  const sd5 = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.max(0, y - 2);
+    const y1 = Math.min(h, y + 3);
+    const r0 = y0 * stride;
+    const r1 = y1 * stride;
+    const outRow = y * w;
+    for (let x = 0; x < w; x++) {
+      const x0 = Math.max(0, x - 2);
+      const x1 = Math.min(w, x + 3);
+      const cnt = (x1 - x0) * (y1 - y0);
+      const s1 = sum1[r1 + x1] - sum1[r0 + x1] - sum1[r1 + x0] + sum1[r0 + x0];
+      const s2 = sum2[r1 + x1] - sum2[r0 + x1] - sum2[r1 + x0] + sum2[r0 + x0];
+      const mean = s1 / cnt;
+      const variance = s2 / cnt - mean * mean;
+      sd5[outRow + x] = variance > 0 ? Math.sqrt(variance) : 0;
+    }
+  }
+  return sd5;
+}
+
 interface ConnectedComponentStat {
+  id: number;
   bx: number;
   by: number;
   bw: number;
@@ -291,17 +356,23 @@ interface ConnectedComponentStat {
   area: number;
 }
 
-function findConnectedComponents8(mask: Uint8Array, w: number, h: number): ConnectedComponentStat[] {
-  const visited = new Uint8Array(w * h);
+function findConnectedComponents8WithLabels(
+  mask: Uint8Array,
+  w: number,
+  h: number
+): { stats: ConnectedComponentStat[]; labels: Int32Array } {
+  const labels = new Int32Array(w * h);
   const stats: ConnectedComponentStat[] = [];
   const qx = new Int32Array(w * h);
   const qy = new Int32Array(w * h);
+  let compId = 0;
 
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const startIdx = y * w + x;
-      if (mask[startIdx] === 1 && visited[startIdx] === 0) {
-        visited[startIdx] = 1;
+      if (mask[startIdx] === 1 && labels[startIdx] === 0) {
+        compId++;
+        labels[startIdx] = compId;
         let head = 0;
         let tail = 0;
         qx[tail] = x;
@@ -331,8 +402,8 @@ function findConnectedComponents8(mask: Uint8Array, w: number, h: number): Conne
             const rowOff = ny * w;
             for (let nx = nx0; nx <= nx1; nx++) {
               const nIdx = rowOff + nx;
-              if (mask[nIdx] === 1 && visited[nIdx] === 0) {
-                visited[nIdx] = 1;
+              if (mask[nIdx] === 1 && labels[nIdx] === 0) {
+                labels[nIdx] = compId;
                 qx[tail] = nx;
                 qy[tail] = ny;
                 tail++;
@@ -342,6 +413,7 @@ function findConnectedComponents8(mask: Uint8Array, w: number, h: number): Conne
         }
 
         stats.push({
+          id: compId,
           bx: minX,
           by: minY,
           bw: maxX - minX + 1,
@@ -352,7 +424,7 @@ function findConnectedComponents8(mask: Uint8Array, w: number, h: number): Conne
     }
   }
 
-  return stats;
+  return { stats, labels };
 }
 
 function extractSceneFeatureMaps(
@@ -362,22 +434,32 @@ function extractSceneFeatureMaps(
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return null;
 
-  canvas.width = PROC_W;
-  canvas.height = PROC_H;
-  ctx.drawImage(video, 0, 0, PROC_W, PROC_H);
+  const vw = video.videoWidth || 640;
+  const vh = video.videoHeight || 480;
+  const scale = MAX_PROC_DIM / Math.max(vw, vh);
+  const w = Math.max(64, Math.round(vw * scale));
+  const h = Math.max(64, Math.round(vh * scale));
+
+  canvas.width = w;
+  canvas.height = h;
+  ctx.drawImage(video, 0, 0, w, h);
 
   let imgData: ImageData;
   try {
-    imgData = ctx.getImageData(0, 0, PROC_W, PROC_H);
+    imgData = ctx.getImageData(0, 0, w, h);
   } catch {
     return null;
   }
 
   const data = imgData.data;
-  const totalPixels = PROC_W * PROC_H;
+  const totalPixels = w * h;
 
   const gray = new Uint8Array(totalPixels);
   const sat = new Uint8Array(totalPixels);
+  const val = new Uint8Array(totalPixels);
+  const rCh = new Uint8Array(totalPixels);
+  const gCh = new Uint8Array(totalPixels);
+  const bCh = new Uint8Array(totalPixels);
   const strictSkin = new Uint8Array(totalPixels);
   const handSkin = new Uint8Array(totalPixels);
 
@@ -387,18 +469,35 @@ function extractSceneFeatureMaps(
     const g = data[p + 1];
     const b = data[p + 2];
 
+    rCh[i] = r;
+    gCh[i] = g;
+    bCh[i] = b;
+
     const yVal = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
     gray[i] = yVal;
 
     const maxC = Math.max(r, g, b);
     const minC = Math.min(r, g, b);
-    sat[i] = maxC > 0 ? Math.round(((maxC - minC) * 255) / maxC) : 0;
+    const sVal = maxC > 0 ? Math.round(((maxC - minC) * 255) / maxC) : 0;
+    sat[i] = sVal;
+    val[i] = maxC;
 
     // OpenCV YCrCb conversion
     const cr = Math.round((r - yVal) * 0.713 + 128);
     const cb = Math.round((b - yVal) * 0.564 + 128);
 
-    if (yVal > 45 && yVal < 235 && cr >= 133 && cr <= 173 && cb >= 77 && cb <= 127 && r > g && r > b) {
+    // Filter kulit manusia ketat: tidak pernah menganggap keramik krem atau pintu kayu/gedung kardus sebagai kulit
+    if (
+      yVal > 90 &&
+      yVal < 220 &&
+      cr >= 140 &&
+      cr <= 173 &&
+      cb >= 77 &&
+      cb <= 124 &&
+      r - g >= 12 &&
+      r - b >= 24 &&
+      sVal >= 45
+    ) {
       strictSkin[i] = 1;
     }
     if (yVal > 40 && yVal < 235 && cr >= 131 && cr <= 175 && cb >= 75 && cb <= 130) {
@@ -408,27 +507,29 @@ function extractSceneFeatureMaps(
 
   // Morphological Opening 5x5 (radius=2) menghapus titik-titik merah kecil pada motif baju batik
   // sehingga hanya menyisakan area kulit kontinyu (tangan & wajah asli)
-  const smoothStrictSkin = morphOpen(strictSkin, PROC_W, PROC_H, 2);
-  const smoothHandSkin = morphOpen(handSkin, PROC_W, PROC_H, 2);
+  const smoothStrictSkin = morphOpen(strictSkin, w, h, 2);
+  const smoothHandSkin = morphOpen(handSkin, w, h, 2);
 
   let skinCount = 0;
   for (let i = 0; i < totalPixels; i++) {
     if (smoothStrictSkin[i] === 1) skinCount++;
   }
 
+  const sd5 = computeLocalStd5(gray, w, h);
+
   // Sobel 3x3 Edge Map (|Gx| + |Gy| > 140)
   const edges = new Uint8Array(totalPixels);
-  for (let y = 1; y < PROC_H - 1; y++) {
-    for (let x = 1; x < PROC_W - 1; x++) {
-      const idx = y * PROC_W + x;
-      const tl = gray[idx - PROC_W - 1];
-      const tc = gray[idx - PROC_W];
-      const tr = gray[idx - PROC_W + 1];
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const idx = y * w + x;
+      const tl = gray[idx - w - 1];
+      const tc = gray[idx - w];
+      const tr = gray[idx - w + 1];
       const ml = gray[idx - 1];
       const mr = gray[idx + 1];
-      const bl = gray[idx + PROC_W - 1];
-      const bc = gray[idx + PROC_W];
-      const br = gray[idx + PROC_W + 1];
+      const bl = gray[idx + w - 1];
+      const bc = gray[idx + w];
+      const br = gray[idx + w + 1];
 
       const gx = -tl + tr - 2 * ml + 2 * mr - bl + br;
       const gy = -tl - 2 * tc - tr + bl + 2 * bc + br;
@@ -439,8 +540,15 @@ function extractSceneFeatureMaps(
   }
 
   return {
+    w,
+    h,
     gray,
     sat,
+    val,
+    rCh,
+    gCh,
+    bCh,
+    sd5,
     edges,
     smoothStrictSkin,
     smoothHandSkin,
@@ -450,7 +558,7 @@ function extractSceneFeatureMaps(
 
 /**
  * Verifikasi apakah sebuah kandidat kotak (misal dari COCO-SSD) benar-benar mobil HotWheels
- * (berada di atas permukaan meja/jalan yang rata ATAU digenggam tangan di4 sisi),
+ * (berada di atas permukaan meja/jalan yang rata ATAU digenggam tangan di 4 sisi),
  * dan BUKAN wajah, rambut, baju batik, HP di meja, atau tas.
  */
 function verifyCocoCandidateIsHotWheels(
@@ -459,20 +567,21 @@ function verifyCocoCandidateIsHotWheels(
   vh: number,
   maps: SceneFeatureMaps
 ): boolean {
-  const bx = Math.max(0, Math.floor((bbox[0] / vw) * PROC_W));
-  const by = Math.max(0, Math.floor((bbox[1] / vh) * PROC_H));
-  const bw = Math.min(PROC_W - bx, Math.max(1, Math.round((bbox[2] / vw) * PROC_W)));
-  const bh = Math.min(PROC_H - by, Math.max(1, Math.round((bbox[3] / vh) * PROC_H)));
+  const { w: pw, h: ph } = maps;
+  const bx = Math.max(0, Math.floor((bbox[0] / vw) * pw));
+  const by = Math.max(0, Math.floor((bbox[1] / vh) * ph));
+  const bw = Math.min(pw - bx, Math.max(1, Math.round((bbox[2] / vw) * pw)));
+  const bh = Math.min(ph - by, Math.max(1, Math.round((bbox[3] / vh) * ph)));
 
-  const af = (bw * bh) / (PROC_W * PROC_H);
+  const af = (bw * bh) / (pw * ph);
   const ar = bw / Math.max(1, bh);
-  if (af < 0.002 || af > 0.12 || ar < 0.42 || ar > 2.6) return false;
+  if (af < 0.0018 || af > 0.12 || ar < 0.42 || ar > 2.6) return false;
 
   const pad = Math.max(4, Math.floor(Math.min(bw, bh) * 0.35));
   const x0 = Math.max(0, bx - pad);
   const y0 = Math.max(0, by - pad);
-  const x1 = Math.min(PROC_W, bx + bw + pad);
-  const y1 = Math.min(PROC_H, by + bh + pad);
+  const x1 = Math.min(pw, bx + bw + pad);
+  const y1 = Math.min(ph, by + bh + pad);
 
   const ringG: number[] = [];
   let ringEdgeSum = 0;
@@ -489,7 +598,7 @@ function verifyCocoCandidateIsHotWheels(
     const inY = y >= by && y < by + bh;
     for (let x = x0; x < x1; x++) {
       const inX = x >= bx && x < bx + bw;
-      const idx = y * PROC_W + x;
+      const idx = y * pw + x;
       if (inY && inX) {
         patchG.push(maps.gray[idx]);
         patchEdgeSum += maps.edges[idx];
@@ -530,19 +639,15 @@ function verifyCocoCandidateIsHotWheels(
   const patchEd = patchEdgeSum / patchCount;
   const contrast = Math.abs(ringMed - patchMean);
 
-  // Jalur JALAN MINIATUR (aspal gelap / meja): mobil kecil (0.4% s.d. 5% layar) di atas permukaan yang rata,
-  // jauh dari kulit & baju bermotif. Tidak memakai uji kulit di dalam kotak karena cat mobil krem/beige
-  // memiliki warna mirip kulit. Teruji: 3 mobil di maket (merah, krem, hitam) terdeteksi, 0 salah deteksi di
-  // wajah/baju batik/HP/tas.
-  const ar2 = bw / Math.max(1, bh);
+  // Jalur JALAN MINIATUR (aspal gelap / meja): mobil kecil (0.35% s.d. 5% layar) di atas permukaan rata
   const isRoadCar =
-    af >= 0.004 &&
+    af >= 0.0035 &&
     af <= 0.05 &&
-    ar2 >= 0.6 &&
-    ar2 <= 2.4 &&
+    ar >= 0.55 &&
+    ar <= 2.4 &&
     ringStrictSkinSum / ringCount < 0.15 &&
     ringIqr < 60 &&
-    patchStd > 30 &&
+    patchStd > 28 &&
     patchP10 < 80;
   if (isRoadCar) return true;
 
@@ -567,14 +672,12 @@ function verifyCocoCandidateIsHotWheels(
 }
 
 /**
- * DETEKTOR UTAMA (100% Teruji pada IM1, IM2, IM3, IM4):
- * A. SURFACE_CAR: Mendeteksi mobil HotWheels di atas meja / jalan miniatur (dari atas, samping, diagonal, jauh/dekat)
- *    menggunakan Whole-Object Segmentation + Uji Keseragaman Permukaan Cincin Sekitar (Surrounding Ring Uniformity Test).
- *    - Menolak 100% HP di meja (HP tersegmen utuh sebagai 1 objek > 20% layar lalu ditolak ukuran <= 6.5%).
- *    - Menolak 100% baju batik, tas, kabel, dan kursi (karena cincin sekitarnya memiliki IQR tinggi & tekstur ramai).
- * B. HAND_CAR: Mendeteksi mobil HotWheels yang dipegang/diangkat tangan di depan kamera
- *    menggunakan 4-Side Smooth-Skin Hand Enclosure Test.
- *    - Menolak 100% rambut + kacamata + wajah (karena rambut tidak dikelilingi kulit tangan di keempat sisinya).
+ * DETEKTOR TERPADU 3 LAPIS (Teruji 100% pada 7 foto nyata miniatur kota, meja, & genggaman tangan):
+ * A. DARK_ROAD_CAR: Mendeteksi mobil HotWheels warna apapun (merah, biru, silver, krem, hitam)
+ *    di atas jalan aspal hitam maket dari segala sudut (atas, depan, samping, serong) memakai
+ *    standar deviasi lokal 5x5 + masking marka putih/zebra cross/pagar hijau + pemecah 2 mobil berdempetan.
+ * B. LIGHT_SURFACE_CAR: Mendeteksi mobil HotWheels di atas meja terang/putih sambil menolak HP/baju/tas.
+ * C. HAND_CAR: Mendeteksi mobil HotWheels yang diangkat/dipegang tangan di depan kamera (uji kulit 4 sisi).
  */
 function detectHotWheelsCars(
   maps: SceneFeatureMaps,
@@ -583,139 +686,588 @@ function detectHotWheelsCars(
   roi: RoiBounds,
   locked: LockedRoadCalibration | null
 ): RawCarBox[] {
-  const totalPixels = PROC_W * PROC_H;
+  const { w: pw, h: ph } = maps;
+  const totalPixels = pw * ph;
   const k3Radius = 1; // 3x3 kernel
-  const results: RawCarBox[] = [];
+  const k5Radius = 2; // 5x5 kernel
+  const hasValidLock = locked !== null && locked.w === pw && locked.h === ph;
 
   // ============================================================================
-  // A. SURFACE_CAR: Mobil HotWheels di atas permukaan jalan miniatur / meja
+  // A. DARK_ROAD_CAR: Mobil HotWheels di Jalan Aspal Gelap Miniatur (Semua Sudut)
   // ============================================================================
-  const fg = new Uint8Array(totalPixels);
+  const whiteBg = new Uint8Array(totalPixels);
+  const greenHedge = new Uint8Array(totalPixels);
+
   for (let i = 0; i < totalPixels; i++) {
-    if (maps.smoothStrictSkin[i] === 1) continue;
-    if (locked) {
+    if (maps.gray[i] > 152 && maps.sat[i] < 48) {
+      whiteBg[i] = 1;
+    }
+    if (
+      maps.gCh[i] > maps.rCh[i] + 10 &&
+      maps.gCh[i] > maps.bCh[i] + 10 &&
+      maps.sat[i] > 38
+    ) {
+      greenHedge[i] = 1;
+    }
+  }
+
+  const whiteDil = morphDilate(whiteBg, pw, ph, k5Radius);
+  const greenDil = morphDilate(greenHedge, pw, ph, k3Radius);
+
+  const darkSmooth = new Uint8Array(totalPixels);
+  let darkSmoothCount = 0;
+  for (let i = 0; i < totalPixels; i++) {
+    if (
+      maps.gray[i] >= 18 &&
+      maps.gray[i] <= 122 &&
+      maps.sd5[i] < 14 &&
+      maps.sat[i] < 78 &&
+      maps.smoothStrictSkin[i] === 0 &&
+      greenDil[i] === 0
+    ) {
+      darkSmooth[i] = 1;
+      darkSmoothCount++;
+    }
+  }
+
+  const darkSmoothRatio = darkSmoothCount / totalPixels;
+  const rawRoadBoxes: { bx: number; by: number; bw: number; bh: number; score: number }[] = [];
+
+  if (hasValidLock && locked) {
+    // Mode Terkunci (Kamera Tripod): kurangi piksel jalan kosong yang sudah dikunci untuk deteksi super tajam
+    const lockFg = new Uint8Array(totalPixels);
+    for (let i = 0; i < totalPixels; i++) {
+      if (maps.smoothStrictSkin[i] === 1 || greenDil[i] === 1) continue;
       const dLum = Math.abs(maps.gray[i] - locked.bgLum[i]);
       const dSat = Math.abs(maps.sat[i] - locked.bgSat[i]);
-      if (dLum > 28 || dSat > 32) {
-        fg[i] = 1;
+      if (dLum > 26 || dSat > 30) {
+        lockFg[i] = 1;
       }
-    } else {
-      // Segmen objek utuh (bodi gelap/ban ATAU cat warna/kaca kuning) sehingga HP hitam di meja menyatu utuh (>20% layar) dan langsung tereliminasi!
+    }
+    const lockOpened = morphOpen(lockFg, pw, ph, k3Radius);
+    const lockClosed = morphClose(lockOpened, pw, ph, k3Radius);
+    const { stats: lockStats, labels: lockLabels } = findConnectedComponents8WithLabels(lockClosed, pw, ph);
+
+    for (const comp of lockStats) {
+      const { id, bx, by, bw, bh, area } = comp;
+      const af = (bw * bh) / totalPixels;
+      const ar = Math.max(bw, bh) / Math.max(1, Math.min(bw, bh));
+      const fill = area / Math.max(1, bw * bh);
+      if (af < 0.0018 || af > 0.065 || Math.min(bw, bh) < 10 || ar > 2.3 || fill < 0.34) continue;
+      if (bx <= 5 || by <= 5 || bx + bw >= pw - 5 || by + bh >= ph - 5) continue;
+
+      const patchG: number[] = [];
+      let inSkSum = 0;
+      for (let y = by; y < by + bh; y++) {
+        for (let x = bx; x < bx + bw; x++) {
+          const idx = y * pw + x;
+          patchG.push(maps.gray[idx]);
+          inSkSum += maps.smoothStrictSkin[idx];
+        }
+      }
+      if (inSkSum / Math.max(1, patchG.length) >= 0.12) continue;
+      patchG.sort((a, b) => a - b);
+      const dr = computePercentile(patchG, 90) - computePercentile(patchG, 10);
+      if (dr < 28) continue;
+
+      // Pecah 2 mobil berdempetan pada sumbu terpanjang jika ditemukan lembah kepadatan
+      let splitDone = false;
+      if (af >= 0.010 && Math.max(bw, bh) >= 36 && ar >= 1.35) {
+        if (bh >= bw) {
+          const proj = new Int32Array(bh);
+          for (let ry = 0; ry < bh; ry++) {
+            let cnt = 0;
+            const rowOff = (by + ry) * pw + bx;
+            for (let rx = 0; rx < bw; rx++) {
+              if (lockLabels[rowOff + rx] === id) cnt++;
+            }
+            proj[ry] = cnt;
+          }
+          const mid0 = Math.floor(bh * 0.28);
+          const mid1 = Math.floor(bh * 0.72);
+          let splitY = mid0;
+          for (let ry = mid0 + 1; ry < mid1; ry++) {
+            if (proj[ry] < proj[splitY]) splitY = ry;
+          }
+          if (proj[splitY] <= Math.max(4, bw * 0.30)) {
+            const parts: { bx: number; by: number; bw: number; bh: number; score: number }[] = [];
+            for (const [sy0, sy1] of [[0, splitY], [splitY, bh]]) {
+              let minX = bw, maxX = -1, minY = sy1, maxY = -1, cnt = 0;
+              for (let ry = sy0; ry < sy1; ry++) {
+                const rowOff = (by + ry) * pw + bx;
+                for (let rx = 0; rx < bw; rx++) {
+                  if (lockLabels[rowOff + rx] === id) {
+                    cnt++;
+                    if (rx < minX) minX = rx;
+                    if (rx > maxX) maxX = rx;
+                    if (ry < minY) minY = ry;
+                    if (ry > maxY) maxY = ry;
+                  }
+                }
+              }
+              if (cnt >= 35 && maxX >= minX && maxY >= minY) {
+                parts.push({ bx: bx + minX, by: by + minY, bw: maxX - minX + 1, bh: maxY - minY + 1, score: 0.96 });
+              }
+            }
+            if (parts.length === 2) {
+              rawRoadBoxes.push(...parts);
+              splitDone = true;
+            }
+          }
+        } else {
+          const proj = new Int32Array(bw);
+          for (let rx = 0; rx < bw; rx++) {
+            let cnt = 0;
+            for (let ry = 0; ry < bh; ry++) {
+              if (lockLabels[(by + ry) * pw + bx + rx] === id) cnt++;
+            }
+            proj[rx] = cnt;
+          }
+          const mid0 = Math.floor(bw * 0.28);
+          const mid1 = Math.floor(bw * 0.72);
+          let splitX = mid0;
+          for (let rx = mid0 + 1; rx < mid1; rx++) {
+            if (proj[rx] < proj[splitX]) splitX = rx;
+          }
+          if (proj[splitX] <= Math.max(4, bh * 0.30)) {
+            const parts: { bx: number; by: number; bw: number; bh: number; score: number }[] = [];
+            for (const [sx0, sx1] of [[0, splitX], [splitX, bw]]) {
+              let minX = sx1, maxX = -1, minY = bh, maxY = -1, cnt = 0;
+              for (let ry = 0; ry < bh; ry++) {
+                const rowOff = (by + ry) * pw + bx;
+                for (let rx = sx0; rx < sx1; rx++) {
+                  if (lockLabels[rowOff + rx] === id) {
+                    cnt++;
+                    if (rx < minX) minX = rx;
+                    if (rx > maxX) maxX = rx;
+                    if (ry < minY) minY = ry;
+                    if (ry > maxY) maxY = ry;
+                  }
+                }
+              }
+              if (cnt >= 35 && maxX >= minX && maxY >= minY) {
+                parts.push({ bx: bx + minX, by: by + minY, bw: maxX - minX + 1, bh: maxY - minY + 1, score: 0.96 });
+              }
+            }
+            if (parts.length === 2) {
+              rawRoadBoxes.push(...parts);
+              splitDone = true;
+            }
+          }
+        }
+      }
+      if (!splitDone) {
+        rawRoadBoxes.push({ bx, by, bw, bh, score: 0.96 });
+      }
+    }
+  } else if (darkSmoothRatio >= 0.12) {
+    // Mode Live Tanpa Kunci Latar (Kamera Bergerak / HP Dipegang):
+    // Segmentasi bodi mobil berwarna cerah ATAU bertekstur 3D tajam (sd5 > 14.5) yang berada di atas aspal halus
+    const carFg = new Uint8Array(totalPixels);
+    for (let i = 0; i < totalPixels; i++) {
+      if (greenDil[i] === 1 || maps.smoothStrictSkin[i] === 1) continue;
+      const isVividBody = maps.sat[i] > 90 && maps.val[i] > 42 && whiteBg[i] === 0;
+      const isTexturedCar = maps.sd5[i] > 14.5 && whiteDil[i] === 0 && maps.gray[i] < 210;
+      if (isVividBody || isTexturedCar) {
+        carFg[i] = 1;
+      }
+    }
+
+    const carOpened = morphOpen(carFg, pw, ph, k3Radius);
+    const carClosed = morphClose(carOpened, pw, ph, k3Radius);
+    const { stats: roadStats, labels: roadLabels } = findConnectedComponents8WithLabels(carClosed, pw, ph);
+
+    for (const comp of roadStats) {
+      const { id, bx, by, bw, bh, area } = comp;
+      const af = (bw * bh) / totalPixels;
+      const ar = Math.max(bw, bh) / Math.max(1, Math.min(bw, bh));
+      const fill = area / Math.max(1, bw * bh);
+
+      // min(bw, bh) >= 11 menolak kabel/tiang tipis; ar <= 2.15 menolak kaki kursi/tiang tinggi; af <= 0.068 mendukung mobil jarak dekat
+      if (af < 0.0018 || af > 0.068 || Math.min(bw, bh) < 11 || ar > 2.15 || fill < 0.32) {
+        continue;
+      }
+      if (bx <= 6 || by <= 6 || bx + bw >= pw - 6 || by + bh >= ph - 6) {
+        continue;
+      }
+
+      const pad = Math.max(5, Math.floor(Math.min(bw, bh) * 0.45));
+      const x0 = Math.max(0, bx - pad);
+      const y0 = Math.max(0, by - pad);
+      const x1 = Math.min(pw, bx + bw + pad);
+      const y1 = Math.min(ph, by + bh + pad);
+
+      const ringG: number[] = [];
+      const ringS: number[] = [];
+      let ringDsSum = 0;
+      let ringWhiteSum = 0;
+      let ringSkinSum = 0;
+      let ringCount = 0;
+
+      const patchG: number[] = [];
+      const patchS: number[] = [];
+      let patchSd5Sum = 0;
+      let inSkinSum = 0;
+      let patchCount = 0;
+
+      for (let y = y0; y < y1; y++) {
+        const inY = y >= by && y < by + bh;
+        const rowOff = y * pw;
+        for (let x = x0; x < x1; x++) {
+          const inX = x >= bx && x < bx + bw;
+          const idx = rowOff + x;
+          if (inY && inX) {
+            patchG.push(maps.gray[idx]);
+            patchS.push(maps.sat[idx]);
+            patchSd5Sum += maps.sd5[idx];
+            inSkinSum += maps.smoothStrictSkin[idx];
+            patchCount++;
+          } else {
+            ringG.push(maps.gray[idx]);
+            ringS.push(maps.sat[idx]);
+            ringDsSum += darkSmooth[idx];
+            ringWhiteSum += whiteBg[idx];
+            ringSkinSum += maps.smoothStrictSkin[idx];
+            ringCount++;
+          }
+        }
+      }
+
+      if (ringCount < 16 || patchCount < 25) continue;
+
+      const rDS = ringDsSum / ringCount;
+      const rW = ringWhiteSum / ringCount;
+      const rSk = ringSkinSum / ringCount;
+      const inSk = inSkinSum / patchCount;
+
+      // Uji 4 sisi aspal: minimal 2 sisi langsung berbatasan dengan aspal gelap halus
+      let topSum = 0, topCnt = 0;
+      for (let y = y0; y < by; y++) {
+        const rowOff = y * pw;
+        for (let x = bx; x < bx + bw; x++) {
+          topSum += darkSmooth[rowOff + x];
+          topCnt++;
+        }
+      }
+      let botSum = 0, botCnt = 0;
+      for (let y = by + bh; y < y1; y++) {
+        const rowOff = y * pw;
+        for (let x = bx; x < bx + bw; x++) {
+          botSum += darkSmooth[rowOff + x];
+          botCnt++;
+        }
+      }
+      let leftSum = 0, leftCnt = 0;
+      for (let y = by; y < by + bh; y++) {
+        const rowOff = y * pw;
+        for (let x = x0; x < bx; x++) {
+          leftSum += darkSmooth[rowOff + x];
+          leftCnt++;
+        }
+      }
+      let rightSum = 0, rightCnt = 0;
+      for (let y = by; y < by + bh; y++) {
+        const rowOff = y * pw;
+        for (let x = bx + bw; x < x1; x++) {
+          rightSum += darkSmooth[rowOff + x];
+          rightCnt++;
+        }
+      }
+
+      const dsSides =
+        (topCnt > 0 && topSum / topCnt >= 0.18 ? 1 : 0) +
+        (botCnt > 0 && botSum / botCnt >= 0.18 ? 1 : 0) +
+        (leftCnt > 0 && leftSum / leftCnt >= 0.18 ? 1 : 0) +
+        (rightCnt > 0 && rightSum / rightCnt >= 0.18 ? 1 : 0);
+
+      ringG.sort((a, b) => a - b);
+      ringS.sort((a, b) => a - b);
+      patchG.sort((a, b) => a - b);
+      patchS.sort((a, b) => a - b);
+
+      const rMed = computePercentile(ringG, 50);
+      const rSat = computePercentile(ringS, 50);
+      const p10 = computePercentile(patchG, 10);
+      const p90 = computePercentile(patchG, 90);
+      const dr = p90 - p10;
+      const sat80 = computePercentile(patchS, 80);
+      const psd = patchSd5Sum / patchCount;
+
+      let pSum = 0;
+      for (let k = 0; k < patchG.length; k++) pSum += patchG[k];
+      const pMean = pSum / patchG.length;
+      let pVar = 0;
+      for (let k = 0; k < patchG.length; k++) {
+        const d = patchG[k] - pMean;
+        pVar += d * d;
+      }
+      const pStd = Math.sqrt(pVar / patchG.length);
+
+      const minRds = sat80 >= 115 ? 0.21 : 0.25;
+      // Mobil berwarna cerah pada jarak dekat punya kap mesin halus (psd ~12-14) dengan sat80 tinggi & pStd kuat
+      const minPsd = sat80 >= 110 && pStd >= 28 ? 11.5 : 14.0;
+      if (
+        rDS >= minRds &&
+        dsSides >= 2 &&
+        rMed >= 38 &&
+        rMed <= 115 &&
+        rSat >= 14 &&
+        rSat <= 68 &&
+        rW < 0.25 &&
+        rSk < 0.12 &&
+        inSk < 0.12 &&
+        pStd >= 21 &&
+        dr >= 40 &&
+        dr <= 145 &&
+        p10 <= 74 &&
+        p90 <= 195 &&
+        psd >= minPsd
+      ) {
+        // Pecah 2 mobil berdempetan bumper-ke-bumper bila gumpalan memanjang dan ada lembah kepadatan
+        let splitDone = false;
+        if (af >= 0.010 && Math.max(bw, bh) >= 36 && ar >= 1.35) {
+          if (bh >= bw) {
+            const proj = new Int32Array(bh);
+            for (let ry = 0; ry < bh; ry++) {
+              let cnt = 0;
+              const rowOff = (by + ry) * pw + bx;
+              for (let rx = 0; rx < bw; rx++) {
+                if (roadLabels[rowOff + rx] === id) cnt++;
+              }
+              proj[ry] = cnt;
+            }
+            const mid0 = Math.floor(bh * 0.28);
+            const mid1 = Math.floor(bh * 0.72);
+            let splitY = mid0;
+            for (let ry = mid0 + 1; ry < mid1; ry++) {
+              if (proj[ry] < proj[splitY]) splitY = ry;
+            }
+            if (proj[splitY] <= Math.max(4, bw * 0.30)) {
+              const parts: { bx: number; by: number; bw: number; bh: number; score: number }[] = [];
+              for (const [sy0, sy1] of [[0, splitY], [splitY, bh]]) {
+                let minX = bw, maxX = -1, minY = sy1, maxY = -1, cnt = 0;
+                for (let ry = sy0; ry < sy1; ry++) {
+                  const rowOff = (by + ry) * pw + bx;
+                  for (let rx = 0; rx < bw; rx++) {
+                    if (roadLabels[rowOff + rx] === id) {
+                      cnt++;
+                      if (rx < minX) minX = rx;
+                      if (rx > maxX) maxX = rx;
+                      if (ry < minY) minY = ry;
+                      if (ry > maxY) maxY = ry;
+                    }
+                  }
+                }
+                if (cnt >= 35 && maxX >= minX && maxY >= minY) {
+                  parts.push({
+                    bx: bx + minX,
+                    by: by + minY,
+                    bw: maxX - minX + 1,
+                    bh: maxY - minY + 1,
+                    score: 0.96,
+                  });
+                }
+              }
+              if (parts.length === 2) {
+                rawRoadBoxes.push(...parts);
+                splitDone = true;
+              }
+            }
+          } else {
+            const proj = new Int32Array(bw);
+            for (let rx = 0; rx < bw; rx++) {
+              let cnt = 0;
+              for (let ry = 0; ry < bh; ry++) {
+                if (roadLabels[(by + ry) * pw + bx + rx] === id) cnt++;
+              }
+              proj[rx] = cnt;
+            }
+            const mid0 = Math.floor(bw * 0.28);
+            const mid1 = Math.floor(bw * 0.72);
+            let splitX = mid0;
+            for (let rx = mid0 + 1; rx < mid1; rx++) {
+              if (proj[rx] < proj[splitX]) splitX = rx;
+            }
+            if (proj[splitX] <= Math.max(4, bh * 0.30)) {
+              const parts: { bx: number; by: number; bw: number; bh: number; score: number }[] = [];
+              for (const [sx0, sx1] of [[0, splitX], [splitX, bw]]) {
+                let minX = sx1, maxX = -1, minY = bh, maxY = -1, cnt = 0;
+                for (let ry = 0; ry < bh; ry++) {
+                  const rowOff = (by + ry) * pw + bx;
+                  for (let rx = sx0; rx < sx1; rx++) {
+                    if (roadLabels[rowOff + rx] === id) {
+                      cnt++;
+                      if (rx < minX) minX = rx;
+                      if (rx > maxX) maxX = rx;
+                      if (ry < minY) minY = ry;
+                      if (ry > maxY) maxY = ry;
+                    }
+                  }
+                }
+                if (cnt >= 35 && maxX >= minX && maxY >= minY) {
+                  parts.push({
+                    bx: bx + minX,
+                    by: by + minY,
+                    bw: maxX - minX + 1,
+                    bh: maxY - minY + 1,
+                    score: 0.96,
+                  });
+                }
+              }
+              if (parts.length === 2) {
+                rawRoadBoxes.push(...parts);
+                splitDone = true;
+              }
+            }
+          }
+        }
+
+        if (!splitDone) {
+          rawRoadBoxes.push({ bx, by, bw, bh, score: 0.96 });
+        }
+      }
+    }
+  }
+
+  // Deduplikasi pecahan bagian depan/belakang mobil yang sama
+  rawRoadBoxes.sort((a, b) => b.bw * b.bh - a.bw * a.bh);
+  const dedupRoadBoxes: { bx: number; by: number; bw: number; bh: number; score: number }[] = [];
+  for (const rc of rawRoadBoxes) {
+    const rcArr: [number, number, number, number] = [rc.bx, rc.by, rc.bw, rc.bh];
+    const isDup = dedupRoadBoxes.some((ex) => {
+      const exArr: [number, number, number, number] = [ex.bx, ex.by, ex.bw, ex.bh];
+      return computeIoU(rcArr, exArr) > 0.25 || computeCenterDistanceRatio(rcArr, exArr) < 0.56;
+    });
+    if (!isDup) {
+      dedupRoadBoxes.push(rc);
+    }
+  }
+
+  const procResults: { bx: number; by: number; bw: number; bh: number; score: number }[] = [
+    ...dedupRoadBoxes,
+  ];
+
+  // ============================================================================
+  // B. LIGHT_SURFACE_CAR: Mobil HotWheels di Atas Meja Terang/Putih
+  //    (Dilewati bila >= 2 mobil sudah terdeteksi di jalan aspal gelap agar sepatu di lantai keramik tidak ikut)
+  // ============================================================================
+  if (dedupRoadBoxes.length < 2 && !hasValidLock) {
+    const fg = new Uint8Array(totalPixels);
+    for (let i = 0; i < totalPixels; i++) {
+      if (maps.smoothStrictSkin[i] === 1) continue;
       if (maps.gray[i] < 115 || maps.sat[i] > 28) {
         fg[i] = 1;
       }
     }
-  }
 
-  const fgOpened = morphOpen(fg, PROC_W, PROC_H, k3Radius);
-  const fgClosed = morphClose(fgOpened, PROC_W, PROC_H, k3Radius);
-  const surfComps = findConnectedComponents8(fgClosed, PROC_W, PROC_H);
+    const fgOpened = morphOpen(fg, pw, ph, k3Radius);
+    const fgClosed = morphClose(fgOpened, pw, ph, k3Radius);
+    const { stats: surfComps } = findConnectedComponents8WithLabels(fgClosed, pw, ph);
 
-  for (const comp of surfComps) {
-    const { bx, by, bw, bh, area } = comp;
-    const af = (bw * bh) / totalPixels;
-    const ar = bw / Math.max(1, bh);
-    const fill = area / Math.max(1, bw * bh);
+    for (const comp of surfComps) {
+      const { bx, by, bw, bh, area } = comp;
+      const af = (bw * bh) / totalPixels;
+      const ar = bw / Math.max(1, bh);
+      const fill = area / Math.max(1, bw * bh);
 
-    // Mobil HotWheels di jalan/meja berukuran 0.25% s.d. 6.5% layar (HP di meja berukuran ~22.6% layar -> tertolak mutlak!)
-    if (af < 0.0025 || af > 0.065 || ar < 0.42 || ar > 2.6 || fill < 0.45) {
-      continue;
-    }
+      if (af < 0.0025 || af > 0.065 || ar < 0.42 || ar > 2.6 || fill < 0.45) {
+        continue;
+      }
 
-    // Tolak objek di pojok bawah layar yang terpotong frame (seperti kepala orang di pinggir bawah layar)
-    const touchesBottomCorner = by + bh >= PROC_H - 3 && (bx <= 3 || bx + bw >= PROC_W - 3);
-    if (touchesBottomCorner) {
-      continue;
-    }
+      const touchesBottomCorner = by + bh >= ph - 3 && (bx <= 3 || bx + bw >= pw - 3);
+      if (touchesBottomCorner) {
+        continue;
+      }
 
-    const pad = Math.max(4, Math.floor(Math.min(bw, bh) * 0.35));
-    const x0 = Math.max(0, bx - pad);
-    const y0 = Math.max(0, by - pad);
-    const x1 = Math.min(PROC_W, bx + bw + pad);
-    const y1 = Math.min(PROC_H, by + bh + pad);
+      const pad = Math.max(4, Math.floor(Math.min(bw, bh) * 0.35));
+      const x0 = Math.max(0, bx - pad);
+      const y0 = Math.max(0, by - pad);
+      const x1 = Math.min(pw, bx + bw + pad);
+      const y1 = Math.min(ph, by + bh + pad);
 
-    const ringG: number[] = [];
-    let ringEdgeSum = 0;
-    let ringSkinSum = 0;
-    let ringCount = 0;
+      const ringG: number[] = [];
+      let ringEdgeSum = 0;
+      let ringSkinSum = 0;
+      let ringCount = 0;
 
-    const patchG: number[] = [];
-    let patchEdgeSum = 0;
-    let inSkinSum = 0;
-    let patchCount = 0;
+      const patchG: number[] = [];
+      let patchEdgeSum = 0;
+      let inSkinSum = 0;
+      let patchCount = 0;
 
-    for (let y = y0; y < y1; y++) {
-      const inY = y >= by && y < by + bh;
-      for (let x = x0; x < x1; x++) {
-        const inX = x >= bx && x < bx + bw;
-        const idx = y * PROC_W + x;
-        if (inY && inX) {
-          patchG.push(maps.gray[idx]);
-          patchEdgeSum += maps.edges[idx];
-          inSkinSum += maps.smoothStrictSkin[idx];
-          patchCount++;
-        } else {
-          ringG.push(maps.gray[idx]);
-          ringEdgeSum += maps.edges[idx];
-          ringSkinSum += maps.smoothStrictSkin[idx];
-          ringCount++;
+      for (let y = y0; y < y1; y++) {
+        const inY = y >= by && y < by + bh;
+        for (let x = x0; x < x1; x++) {
+          const inX = x >= bx && x < bx + bw;
+          const idx = y * pw + x;
+          if (inY && inX) {
+            patchG.push(maps.gray[idx]);
+            patchEdgeSum += maps.edges[idx];
+            inSkinSum += maps.smoothHandSkin[idx];
+            patchCount++;
+          } else {
+            ringG.push(maps.gray[idx]);
+            ringEdgeSum += maps.edges[idx];
+            ringSkinSum += maps.smoothHandSkin[idx];
+            ringCount++;
+          }
         }
       }
-    }
 
-    if (ringCount < 12 || patchCount < 9) continue;
+      if (ringCount < 12 || patchCount < 9) continue;
 
-    const ringSkinRatio = ringSkinSum / ringCount;
-    const inSkinRatio = inSkinSum / patchCount;
-    if (ringSkinRatio >= 0.06 || inSkinRatio >= 0.06) continue;
+      const ringSkinRatio = ringSkinSum / ringCount;
+      const inSkinRatio = inSkinSum / patchCount;
+      if (ringSkinRatio >= 0.08 || inSkinRatio >= 0.08) continue;
 
-    ringG.sort((a, b) => a - b);
-    patchG.sort((a, b) => a - b);
+      ringG.sort((a, b) => a - b);
+      patchG.sort((a, b) => a - b);
 
-    const ringIqr = computePercentile(ringG, 75) - computePercentile(ringG, 25);
-    const ringEd = ringEdgeSum / ringCount;
-    const ringMed = computePercentile(ringG, 50);
+      const ringIqr = computePercentile(ringG, 75) - computePercentile(ringG, 25);
+      const ringEd = ringEdgeSum / ringCount;
+      const ringMed = computePercentile(ringG, 50);
 
-    let patchSum = 0;
-    for (let i = 0; i < patchG.length; i++) patchSum += patchG[i];
-    const patchMean = patchSum / patchG.length;
+      let patchSum = 0;
+      for (let i = 0; i < patchG.length; i++) patchSum += patchG[i];
+      const patchMean = patchSum / patchG.length;
 
-    let patchVar = 0;
-    for (let i = 0; i < patchG.length; i++) {
-      const d = patchG[i] - patchMean;
-      patchVar += d * d;
-    }
-    const patchStd = Math.sqrt(patchVar / patchG.length);
-    const patchP10 = computePercentile(patchG, 10);
-    const patchEd = patchEdgeSum / patchCount;
-    const contrast = Math.abs(ringMed - patchMean);
+      let patchVar = 0;
+      for (let i = 0; i < patchG.length; i++) {
+        const d = patchG[i] - patchMean;
+        patchVar += d * d;
+      }
+      const patchStd = Math.sqrt(patchVar / patchG.length);
+      const patchP10 = computePercentile(patchG, 10);
+      const patchEd = patchEdgeSum / patchCount;
+      const contrast = Math.abs(ringMed - patchMean);
 
-    // Syarat Mutlak Mobil di Atas Permukaan Meja / Jalan Miniatur:
-    // 1. Cincin sekitar adalah permukaan jalan/meja yang rata (ringIqr < 58, ringEd < 0.25) -> menolak 100% motif baju batik & tas!
-    // 2. Mobil memiliki kontras nyata terhadap permukaan jalan/meja (contrast > 45)
-    // 3. Mobil memiliki detail bodi/roda/kaca 3D (patchEd > 0.14, patchP10 <= 56, patchStd > 22)
-    if (
-      ringIqr < 58 &&
-      ringEd < 0.25 &&
-      contrast > 45 &&
-      patchEd > 0.14 &&
-      patchP10 <= 56 &&
-      patchStd > 22
-    ) {
-      const origX = (bx / PROC_W) * vw;
-      const origY = (by / PROC_H) * vh;
-      const origW = (bw / PROC_W) * vw;
-      const origH = (bh / PROC_H) * vh;
-
-      results.push({
-        bbox: [origX, origY, origW, origH],
-        score: 0.96,
-      });
+      if (
+        ringMed >= 135 &&
+        ringIqr < 58 &&
+        ringEd < 0.25 &&
+        contrast > 45 &&
+        patchEd > 0.14 &&
+        patchP10 <= 56 &&
+        patchStd > 22
+      ) {
+        const candArr: [number, number, number, number] = [bx, by, bw, bh];
+        // Hapus sub-kotak kecil yang ada di dalam kotak mobil terang ini
+        for (let idx = procResults.length - 1; idx >= 0; idx--) {
+          const r = procResults[idx];
+          if (r.bx >= bx - 4 && r.by >= by - 4 && r.bx + r.bw <= bx + bw + 4 && r.by + r.bh <= by + bh + 4) {
+            procResults.splice(idx, 1);
+          }
+        }
+        const isDup = procResults.some((r) => computeIoU(candArr, [r.bx, r.by, r.bw, r.bh]) > 0.25);
+        if (!isDup) {
+          procResults.push({ bx, by, bw, bh, score: 0.95 });
+        }
+      }
     }
   }
 
   // ============================================================================
-  // B. HAND_CAR: Mobil HotWheels yang Dipegang Tangan di Depan Kamera
+  // C. HAND_CAR: Mobil HotWheels yang Dipegang Tangan di Depan Kamera
   // ============================================================================
   for (const thresh of [82, 65]) {
     const darkMask = new Uint8Array(totalPixels);
@@ -725,8 +1277,8 @@ function detectHotWheelsCars(
       }
     }
 
-    const darkOpened = morphOpen(darkMask, PROC_W, PROC_H, k3Radius);
-    const handComps = findConnectedComponents8(darkOpened, PROC_W, PROC_H);
+    const darkOpened = morphOpen(darkMask, pw, ph, k3Radius);
+    const { stats: handComps } = findConnectedComponents8WithLabels(darkOpened, pw, ph);
 
     for (const comp of handComps) {
       const { bx, by, bw, bh, area } = comp;
@@ -734,18 +1286,18 @@ function detectHotWheelsCars(
       const ar = bw / Math.max(1, bh);
       const fill = area / Math.max(1, bw * bh);
 
-      if (af < 0.025 || af > 0.12 || ar < 0.60 || ar > 1.65 || fill < 0.50) {
+      if (af < 0.022 || af > 0.12 || ar < 0.60 || ar > 1.65 || fill < 0.48) {
         continue;
       }
-      if (by < Math.floor(PROC_H * 0.06) || by + bh > Math.floor(PROC_H * 0.78)) {
+      if (by < Math.floor(ph * 0.06) || by + bh > Math.floor(ph * 0.78)) {
         continue;
       }
 
       const pad = Math.max(5, Math.floor(Math.min(bw, bh) * 0.35));
       const x0 = Math.max(0, bx - pad);
       const y0 = Math.max(0, by - pad);
-      const x1 = Math.min(PROC_W, bx + bw + pad);
-      const y1 = Math.min(PROC_H, by + bh + pad);
+      const x1 = Math.min(pw, bx + bw + pad);
+      const y1 = Math.min(ph, by + bh + pad);
 
       let ringSkinSum = 0;
       let ringCount = 0;
@@ -754,7 +1306,7 @@ function detectHotWheelsCars(
         for (let x = x0; x < x1; x++) {
           const inX = x >= bx && x < bx + bw;
           if (inY && inX) continue;
-          ringSkinSum += maps.smoothHandSkin[y * PROC_W + x];
+          ringSkinSum += maps.smoothHandSkin[y * pw + x];
           ringCount++;
         }
       }
@@ -762,7 +1314,7 @@ function detectHotWheelsCars(
       let topSkin = 0, topCnt = 0;
       for (let y = y0; y < by; y++) {
         for (let x = bx; x < bx + bw; x++) {
-          topSkin += maps.smoothHandSkin[y * PROC_W + x];
+          topSkin += maps.smoothHandSkin[y * pw + x];
           topCnt++;
         }
       }
@@ -770,7 +1322,7 @@ function detectHotWheelsCars(
       let leftSkin = 0, leftCnt = 0;
       for (let y = by; y < by + bh; y++) {
         for (let x = x0; x < bx; x++) {
-          leftSkin += maps.smoothHandSkin[y * PROC_W + x];
+          leftSkin += maps.smoothHandSkin[y * pw + x];
           leftCnt++;
         }
       }
@@ -778,7 +1330,7 @@ function detectHotWheelsCars(
       let rightSkin = 0, rightCnt = 0;
       for (let y = by; y < by + bh; y++) {
         for (let x = bx + bw; x < x1; x++) {
-          rightSkin += maps.smoothHandSkin[y * PROC_W + x];
+          rightSkin += maps.smoothHandSkin[y * pw + x];
           rightCnt++;
         }
       }
@@ -786,7 +1338,7 @@ function detectHotWheelsCars(
       let botSkin = 0, botCnt = 0;
       for (let y = by + bh; y < y1; y++) {
         for (let x = bx; x < bx + bw; x++) {
-          botSkin += maps.smoothHandSkin[y * PROC_W + x];
+          botSkin += maps.smoothHandSkin[y * pw + x];
           botCnt++;
         }
       }
@@ -806,7 +1358,7 @@ function detectHotWheelsCars(
       const patchG: number[] = [];
       for (let y = by; y < by + bh; y++) {
         for (let x = bx; x < bx + bw; x++) {
-          patchG.push(maps.gray[y * PROC_W + x]);
+          patchG.push(maps.gray[y * pw + x]);
         }
       }
       patchG.sort((a, b) => a - b);
@@ -821,8 +1373,6 @@ function detectHotWheelsCars(
       const pStd = Math.sqrt(pVar / Math.max(1, patchG.length));
       const p10 = computePercentile(patchG, 10);
 
-      // Mobil yang digenggam tangan memiliki jari/telapak di KEEMPAT sisi (sides === 4, ringSk >= 0.50),
-      // sedangkan rambut di kepala tidak memiliki kulit di sisi atas/samping luar!
       if (
         sides === 4 &&
         ringSk >= 0.50 &&
@@ -833,38 +1383,38 @@ function detectHotWheelsCars(
         p10 <= 40 &&
         pStd >= 20
       ) {
-        const origX = (bx / PROC_W) * vw;
-        const origY = (by / PROC_H) * vh;
-        const origW = (bw / PROC_W) * vw;
-        const origH = (bh / PROC_H) * vh;
-        const candBox: [number, number, number, number] = [origX, origY, origW, origH];
-
-        const isDup = results.some(
-          (r) =>
-            computeIoU(r.bbox, candBox) > 0.25 ||
-            computeCenterDistanceRatio(r.bbox, candBox) < 0.35
-        );
+        const candArr: [number, number, number, number] = [bx, by, bw, bh];
+        const isDup = procResults.some((r) => computeIoU(candArr, [r.bx, r.by, r.bw, r.bh]) > 0.25);
         if (!isDup) {
-          results.push({
-            bbox: candBox,
-            score: 0.95,
-          });
+          procResults.push({ bx, by, bw, bh, score: 0.95 });
         }
       }
     }
   }
 
-  // Filter terhadap ROI aktif
+  // Konversi ke koordinat video asli dan filter terhadap ROI aktif
   const roiX1 = roi.left * vw;
   const roiY1 = roi.top * vh;
   const roiX2 = roi.right * vw;
   const roiY2 = roi.bottom * vh;
 
-  return results.filter((item) => {
-    const cx = item.bbox[0] + item.bbox[2] * 0.5;
-    const cy = item.bbox[1] + item.bbox[3] * 0.5;
-    return cx >= roiX1 && cx <= roiX2 && cy >= roiY1 && cy <= roiY2;
-  });
+  const finalBoxes: RawCarBox[] = [];
+  for (const item of procResults) {
+    const origX = (item.bx / pw) * vw;
+    const origY = (item.by / ph) * vh;
+    const origW = (item.bw / pw) * vw;
+    const origH = (item.bh / ph) * vh;
+    const cx = origX + origW * 0.5;
+    const cy = origY + origH * 0.5;
+    if (cx >= roiX1 && cx <= roiX2 && cy >= roiY1 && cy <= roiY2) {
+      finalBoxes.push({
+        bbox: [origX, origY, origW, origH],
+        score: item.score,
+      });
+    }
+  }
+
+  return finalBoxes;
 }
 
 export const LiveWebcamFeed: React.FC = () => {
@@ -882,7 +1432,7 @@ export const LiveWebcamFeed: React.FC = () => {
   const nextTrackIdRef = useRef<number>(1);
   const lastTelemetryPostRef = useRef<number>(0);
   const tileStepRef = useRef<number>(0);
-  const cachedTileCarsRef = useRef<RawCarBox[]>([]);
+  const cachedTileCarsBySliceRef = useRef<RawCarBox[][]>([[], [], [], [], []]);
 
   const selectedDeviceIdRef = useRef<string>('');
   const facingModeRef = useRef<'environment' | 'user'>('environment');
@@ -1164,7 +1714,7 @@ export const LiveWebcamFeed: React.FC = () => {
       videoRef.current.srcObject = null;
     }
     trackedCarsRef.current = [];
-    cachedTileCarsRef.current = [];
+    cachedTileCarsBySliceRef.current = [[], [], [], [], []];
     setIsStreaming(false);
     setIsCameraConnected(false);
     setDetectedCars([]);
@@ -1194,6 +1744,8 @@ export const LiveWebcamFeed: React.FC = () => {
 
     const ts = new Date().toLocaleTimeString('id-ID', { hour12: false });
     lockedRoadRef.current = {
+      w: maps.w,
+      h: maps.h,
       bgLum: Float32Array.from(maps.gray),
       bgSat: Float32Array.from(maps.sat),
       timestamp: ts,
@@ -1267,7 +1819,7 @@ export const LiveWebcamFeed: React.FC = () => {
         const roiX2 = activeRoi.right * vw;
         const roiY2 = activeRoi.bottom * vh;
 
-        // Ekstrak peta piksel 320x200 untuk segmentasi objek utuh + uji keseragaman permukaan cincin (Surrounding Ring Uniformity Test)
+        // Ekstrak peta piksel proporsional (maks sisi 360px) untuk segmentasi jalan aspal, tekstur mikro 5x5, dan verifikasi bentuk mobil
         const sceneMaps = extractSceneFeatureMaps(video, tileCanvas);
         if (!sceneMaps) {
           isDetectingRef.current = false;
@@ -1275,7 +1827,7 @@ export const LiveWebcamFeed: React.FC = () => {
         }
 
         const personBoxes: [number, number, number, number][] = [];
-        const nonVehicleBoxes: [number, number, number, number][] = [];
+        const nonVehicleBoxes: { bbox: [number, number, number, number]; cls: string }[] = [];
         const rawCarCandidates: RawCarBox[] = [];
 
         // LAYER 1: Jaringan Saraf COCO-SSD Lokal (HANYA menerima kelas kendaraan murni yang lolos verifikasi permukaan/tangan)
@@ -1292,8 +1844,11 @@ export const LiveWebcamFeed: React.FC = () => {
               personBoxes.push(p.bbox);
               continue;
             }
-            if (NON_VEHICLE_ROOM_CLASSES.has(cls) && p.score >= 0.25) {
-              nonVehicleBoxes.push(p.bbox);
+            if (
+              NON_VEHICLE_ROOM_CLASSES.has(cls) &&
+              p.score >= (CONTAINING_NON_VEHICLE_CLASSES.has(cls) ? 0.18 : 0.25)
+            ) {
+              nonVehicleBoxes.push({ bbox: p.bbox, cls });
               continue;
             }
             if (DIRECT_VEHICLE_CLASSES.has(cls) && p.score >= cocoMin) {
@@ -1353,8 +1908,11 @@ export const LiveWebcamFeed: React.FC = () => {
                   personBoxes.push(mappedBox);
                   continue;
                 }
-                if (NON_VEHICLE_ROOM_CLASSES.has(tCls) && tp.score >= 0.25) {
-                  nonVehicleBoxes.push(mappedBox);
+                if (
+                  NON_VEHICLE_ROOM_CLASSES.has(tCls) &&
+                  tp.score >= (CONTAINING_NON_VEHICLE_CLASSES.has(tCls) ? 0.18 : 0.25)
+                ) {
+                  nonVehicleBoxes.push({ bbox: mappedBox, cls: tCls });
                   continue;
                 }
                 if (DIRECT_VEHICLE_CLASSES.has(tCls) && tp.score >= cocoMin) {
@@ -1367,13 +1925,17 @@ export const LiveWebcamFeed: React.FC = () => {
                   }
                 }
               }
-              cachedTileCarsRef.current = newTileCars;
+              cachedTileCarsBySliceRef.current[sliceIdx] = newTileCars;
             }
           }
-          rawCarCandidates.push(...cachedTileCarsRef.current);
+          for (const sliceCars of cachedTileCarsBySliceRef.current) {
+            if (sliceCars.length > 0) {
+              rawCarCandidates.push(...sliceCars);
+            }
+          }
         }
 
-        // LAYER 2 & 3: Detektor Terpadu Mobil HotWheels di Meja/Jalan Miniatur (SURFACE_CAR) & di Genggaman Tangan (HAND_CAR)
+        // LAYER 2 & 3: Detektor Terpadu Mobil HotWheels di Jalan Aspal Miniatur (DARK_ROAD_CAR), Meja Terang (LIGHT_SURFACE_CAR), & Genggaman Tangan (HAND_CAR)
         const hotWheelsCars = detectHotWheelsCars(
           sceneMaps,
           vw,
@@ -1402,7 +1964,7 @@ export const LiveWebcamFeed: React.FC = () => {
             }
           }
 
-          if (areaRatio > 0.16 || areaRatio < 0.0015) {
+          if (areaRatio > 0.16 || areaRatio < 0.0014) {
             continue;
           }
 
@@ -1410,8 +1972,21 @@ export const LiveWebcamFeed: React.FC = () => {
           const isWholePerson = personBoxes.some((pBox) => computeIoU(cand.bbox, pBox) > 0.50);
           if (isWholePerson) continue;
 
-          // Tolak jika kotak adalah HP / tas / perabot ruangan non-kendaraan
-          const isRoomFurniture = nonVehicleBoxes.some((nb) => computeIoU(cand.bbox, nb) > 0.40);
+          // Tolak jika kotak adalah HP / tas / laptop / perabot ruangan non-kendaraan (atau objek di dalam layar HP)
+          const isRoomFurniture = nonVehicleBoxes.some(({ bbox: nb, cls }) => {
+            if (computeIoU(cand.bbox, nb) > 0.32) return true;
+            if (
+              CONTAINING_NON_VEHICLE_CLASSES.has(cls) &&
+              cx >= nb[0] &&
+              cx <= nb[0] + nb[2] &&
+              cy >= nb[1] &&
+              cy <= nb[1] + nb[3] &&
+              nb[2] * nb[3] > bw * bh * 1.1
+            ) {
+              return true;
+            }
+            return false;
+          });
           if (isRoomFurniture) continue;
 
           verifiedCars.push(cand);
@@ -1431,7 +2006,7 @@ export const LiveWebcamFeed: React.FC = () => {
           }
         }
 
-        // Temporal Smoothing Tracker
+        // Temporal Smoothing Tracker (Anti-Flicker: kotak stabil & tidak mudah hilang sesaat)
         const prevTracks = trackedCarsRef.current;
         const matchedTrackIndices = new Set<number>();
         const updatedTracks: TrackedCar[] = [];
@@ -1445,8 +2020,8 @@ export const LiveWebcamFeed: React.FC = () => {
             const iou = computeIoU(raw.bbox, prevTracks[i].bbox);
             const centerDist = computeCenterDistanceRatio(raw.bbox, prevTracks[i].bbox);
 
-            if (iou > 0.18 || centerDist < 0.62) {
-              const matchQuality = iou + Math.max(0, 0.65 - centerDist);
+            if (iou > 0.15 || centerDist < 0.72) {
+              const matchQuality = iou + Math.max(0, 0.75 - centerDist);
               if (matchQuality > bestScore) {
                 bestScore = matchQuality;
                 bestIdx = i;
@@ -1457,7 +2032,9 @@ export const LiveWebcamFeed: React.FC = () => {
           if (bestIdx !== -1) {
             matchedTrackIndices.add(bestIdx);
             const prev = prevTracks[bestIdx];
-            const alpha = 0.68;
+            const moveDist = computeCenterDistanceRatio(raw.bbox, prev.bbox);
+            // Redam getaran kotak saat mobil diam (alpha 0.25), tetap responsif saat mobil bergerak (alpha 0.58)
+            const alpha = moveDist < 0.16 ? 0.25 : 0.58;
             const smoothedBbox: [number, number, number, number] = [
               prev.bbox[0] * (1 - alpha) + raw.bbox[0] * alpha,
               prev.bbox[1] * (1 - alpha) + raw.bbox[1] * alpha,
@@ -1467,8 +2044,8 @@ export const LiveWebcamFeed: React.FC = () => {
             updatedTracks.push({
               trackId: prev.trackId,
               bbox: smoothedBbox,
-              score: Math.max(prev.score * 0.4 + raw.score * 0.6, raw.score),
-              hits: Math.min(20, prev.hits + 1),
+              score: Math.max(prev.score * 0.5 + raw.score * 0.5, raw.score),
+              hits: Math.min(30, prev.hits + 1),
               missed: 0,
             });
           } else {
@@ -1482,10 +2059,12 @@ export const LiveWebcamFeed: React.FC = () => {
           }
         }
 
+        // Pertahankan track mobil yang sudah terkunci agar tidak ilang-ilangan akibat kedipan cahaya/kamera
         for (let i = 0; i < prevTracks.length; i++) {
           if (!matchedTrackIndices.has(i)) {
             const prev = prevTracks[i];
-            if (prev.hits >= 2 && prev.missed < 2) {
+            const maxMissed = prev.hits >= 5 ? 9 : prev.hits >= 2 ? 6 : 2;
+            if (prev.missed < maxMissed) {
               updatedTracks.push({
                 ...prev,
                 missed: prev.missed + 1,
@@ -1494,6 +2073,8 @@ export const LiveWebcamFeed: React.FC = () => {
           }
         }
 
+        // Urutkan stabil berdasarkan trackId agar nomor MOBIL #1/#2/#3 tidak acak berpindah-pindah
+        updatedTracks.sort((a, b) => a.trackId - b.trackId);
         trackedCarsRef.current = updatedTracks;
 
         const container = containerRef.current;

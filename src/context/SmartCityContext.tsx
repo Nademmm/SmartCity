@@ -1225,11 +1225,11 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
 
         // Jika tidak sedang terhubung langsung lewat USB Web Serial, ambil paket baru dari Cloud Bridge
         if (!isSerialConnected) {
-          // 2. Smart PJU Data (ESP32)
+          // 2. Smart PJU Data (ESP32 Wi-Fi / Cloud Bridge)
           if (data.latestBySubsystem['pju']) {
             const pjuPacket = data.latestBySubsystem['pju'];
             const packetAge = now - new Date(pjuPacket.timestamp).getTime();
-            if (packetAge < 8000) {
+            if (packetAge < 12000) {
               espDataFresh = true;
               if (
                 pjuPacket.timestamp !== lastPjuTsRef.current &&
@@ -1262,11 +1262,11 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
             }
           }
 
-          // 3. Smart Penyeberangan Sensor Touch + Dual Traffic Light (ESP32)
+          // 3. Smart Penyeberangan Sensor Touch + Dual Traffic Light (ESP32 Wi-Fi / Cloud Bridge)
           if (data.latestBySubsystem['pedestrian']) {
             const pedPacket = data.latestBySubsystem['pedestrian'];
             const packetAge = now - new Date(pedPacket.timestamp).getTime();
-            if (packetAge < 8000) {
+            if (packetAge < 12000) {
               espDataFresh = true;
               if (
                 pedPacket.timestamp !== lastPedTsRef.current &&
@@ -1304,11 +1304,11 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
             }
           }
 
-          // 4. Sensor Gas MQ + LCD 16x2 Data (ESP32)
+          // 4. Sensor Gas MQ + LCD 16x2 Data (ESP32 Wi-Fi / Cloud Bridge)
           if (data.latestBySubsystem['air-quality']) {
             const gasPacket = data.latestBySubsystem['air-quality'];
             const packetAge = now - new Date(gasPacket.timestamp).getTime();
-            if (packetAge < 8000) {
+            if (packetAge < 12000) {
               espDataFresh = true;
               if (
                 gasPacket.timestamp !== lastGasTsRef.current &&
@@ -1366,7 +1366,11 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
               return {
                 ...d,
                 status: espDataFresh ? 'Online' : 'Offline',
-                lastPing: espDataFresh ? 'Aktif (COM3)' : 'Siaga',
+                lastPing: isSerialConnected
+                  ? 'Aktif (USB Serial)'
+                  : espDataFresh
+                  ? 'Aktif (Wi-Fi Cloud)'
+                  : 'Siaga',
               };
             }
             return d;

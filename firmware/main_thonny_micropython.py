@@ -2,7 +2,46 @@ from machine import Pin, ADC, SoftI2C
 import time
 import sys
 import uselect
+import gc
+import ujson
 from i2c_lcd import I2cLcd
+
+try:
+    import network
+    import socket
+    import _thread
+    WIFI_AVAILABLE = True
+except Exception:
+    WIFI_AVAILABLE = False
+
+try:
+    import ssl
+except Exception:
+    try:
+        import ussl as ssl
+    except Exception:
+        ssl = None
+
+# ==================================================
+# 0. KONFIGURASI WIFI & CLOUD DASHBOARD (TANPA USB)
+# ==================================================
+# Isi nama Wi-Fi (2.4 GHz) dan password Anda di sini, ATAU atur langsung dari:
+# - Web Dashboard (tab Serial & Log -> Koneksi Wi-Fi ESP32), ATAU
+# - Portal Wi-Fi Cadangan ESP32: hubungkan HP ke "SmartCity-ESP32-Setup"
+#   (sandi: 12345678) lalu buka http://192.168.4.1
+WIFI_DEFAULT_LIST = [
+    # ("NAMA_WIFI_ATAU_HOTSPOT_HP", "PASSWORD_WIFI"),
+]
+
+WIFI_CONFIG_FILE = "wifi_config.json"
+AP_SSID = "SmartCity-ESP32-Setup"
+AP_PASS = "12345678"
+
+CLOUD_HOST = "smartcity-esp32.vercel.app"
+CLOUD_PORT = 443
+CLOUD_PATH = "/api/iot/telemetry"
+DEVICE_ID = "ESP32-MINIATURE"
+INTERVAL_CLOUD_MS = 1200
 
 # ==================================================
 # 1. LCD I2C (AUTO-DETEKSI SCL & SDA)
@@ -121,139 +160,550 @@ buzzer_test_sampai = 0
 
 # Flag kirim telemetri segera ketika ada perubahan state
 kirim_segera = True
+cloud_kirim_segera = True
+
+# State Wi-Fi & snapshot telemetri untuk worker thread
+wifi_terhubung = False
+wifi_ssid_aktif = ""
+wifi_ip_aktif = ""
+wifi_reconnect_flag = False
+lcd_pesan_sementara_sampai = 0
+lcd_pesan_baris1 = ""
+lcd_pesan_baris2 = ""
+
+telemetri_terbaru = {
+    "gas": 0,
+    "gasMode": "AUTO",
+    "statusPolusi": "UDARA BERSIH",
+    "touchKanan": False,
+    "touchKiri": False,
+    "lampu": "NORMAL",
+    "countdown": 0,
+    "buzzerSeberang": False,
+    "ldr": 0,
+    "kondisi": "TERANG",
+    "pjuStatus": "MATI",
+    "pjuMode": "AUTO",
+}
+
+
+def tampilkan_pesan_lcd(b1, b2, durasi_ms=2500):
+    global lcd_pesan_sementara_sampai, lcd_pesan_baris1, lcd_pesan_baris2
+    lcd_pesan_baris1 = "{:<16}".format(str(b1)[:16])
+    lcd_pesan_baris2 = "{:<16}".format(str(b2)[:16])
+    lcd_pesan_sementara_sampai = time.ticks_add(time.ticks_ms(), durasi_ms)
+
+
+def muat_daftar_wifi():
+    daftar = []
+    try:
+        with open(WIFI_CONFIG_FILE, "r") as f:
+            cfg = ujson.loads(f.read())
+            s = cfg.get("ssid", "").strip()
+            p = cfg.get("password", "")
+            if s:
+                daftar.append((s, p))
+    except Exception:
+        pass
+    for item in WIFI_DEFAULT_LIST:
+        if item and item[0]:
+            daftar.append((item[0], item[1]))
+    return daftar
+
+
+def simpan_wifi_config(ssid, password):
+    global wifi_reconnect_flag
+    try:
+        with open(WIFI_CONFIG_FILE, "w") as f:
+            f.write(ujson.dumps({"ssid": ssid, "password": password}))
+        wifi_reconnect_flag = True
+        print(">>> WIFI DISIMPAN:", ssid)
+        tampilkan_pesan_lcd("WIFI DISIMPAN:", ssid, 2500)
+        return True
+    except Exception as e:
+        print("[WIFI SAVE ERR]", e)
+        return False
+
+
+def url_decode(text):
+    text = text.replace("+", " ")
+    out = ""
+    i = 0
+    n = len(text)
+    while i < n:
+        if text[i] == "%" and i + 2 < n:
+            try:
+                out += chr(int(text[i + 1:i + 3], 16))
+                i += 3
+                continue
+            except Exception:
+                pass
+        out += text[i]
+        i += 1
+    return out
+
 
 # ==================================================
-# 9. SERIAL LISTENER NON-BLOCKING UNTUK WEB DASHBOARD
+# 9. DISPATCHER PERINTAH (USB SERIAL + WIFI CLOUD)
 # ==================================================
 spoll = uselect.poll()
 spoll.register(sys.stdin, uselect.POLLIN)
 
 
 def mulai_penyeberangan(sumber="TOUCH"):
-    global fase_penyeberangan, waktu_fase, kirim_segera
+    global fase_penyeberangan, waktu_fase, kirim_segera, cloud_kirim_segera
 
     if fase_penyeberangan == "NORMAL":
         fase_penyeberangan = "KUNING_KENDARAAN"
         waktu_fase = time.ticks_ms()
         kirim_segera = True
+        cloud_kirim_segera = True
         print(">>> PERMINTAAN PENYEBERANGAN DITERIMA:", sumber)
 
 
 def reset_penyeberangan():
-    global fase_penyeberangan, waktu_fase, kirim_segera
+    global fase_penyeberangan, waktu_fase, kirim_segera, cloud_kirim_segera
 
     fase_penyeberangan = "NORMAL"
     waktu_fase = time.ticks_ms()
     kirim_segera = True
+    cloud_kirim_segera = True
     atur_traffic_light("NORMAL")
     print(">>> PENYEBERANGAN DIRESET KE NORMAL")
 
 
-def cek_perintah_jaringan():
+def eksekusi_perintah(line):
     global pju_manual_mode, ldr_override_mode, nilai_ldr_manual
     global gas_override_mode, nilai_gas_manual, buzzer_muted
-    global buzzer_test_sampai, kirim_segera
+    global buzzer_test_sampai, kirim_segera, cloud_kirim_segera
+    global wifi_reconnect_flag
 
+    line = line.strip()
+    if not line:
+        return
+
+    print(">>> PERINTAH DITERIMA:", line)
+
+    if line == "CMD:PJU_ON":
+        pju_manual_mode = "ON"
+        kirim_segera = True
+        cloud_kirim_segera = True
+        print(">>> PJU MANUAL ON")
+
+    elif line == "CMD:PJU_OFF":
+        pju_manual_mode = "OFF"
+        kirim_segera = True
+        cloud_kirim_segera = True
+        print(">>> PJU MANUAL OFF")
+
+    elif line == "CMD:PJU_AUTO":
+        pju_manual_mode = "AUTO"
+        ldr_override_mode = "AUTO"
+        kirim_segera = True
+        cloud_kirim_segera = True
+        print(">>> PJU OTOMATIS LDR")
+
+    elif line.startswith("CMD:LDR_SET:"):
+        try:
+            nilai_ldr_manual = int(line.split(":")[2])
+            ldr_override_mode = "MANUAL"
+            kirim_segera = True
+            cloud_kirim_segera = True
+            print(">>> LDR MANUAL SET:", nilai_ldr_manual)
+        except Exception as ex:
+            print("[ERR_LDR_SET]", ex)
+
+    elif line in ("CMD:FORCE_CROSSING", "CMD:CROSSING_TRIGGER"):
+        mulai_penyeberangan("WEB DASHBOARD")
+
+    elif line == "CMD:TOUCH_KANAN":
+        mulai_penyeberangan("WEB TOUCH KANAN")
+
+    elif line == "CMD:TOUCH_KIRI":
+        mulai_penyeberangan("WEB TOUCH KIRI")
+
+    elif line == "CMD:CROSSING_RESET":
+        reset_penyeberangan()
+
+    elif line in ("CMD:BUZZER_TEST", "CMD:ALARM_TEST"):
+        buzzer_test_sampai = time.ticks_add(time.ticks_ms(), 300)
+        print(">>> UJI BUZZER SUKSES")
+
+    elif line == "CMD:BUZZER_MUTE":
+        buzzer_muted = True
+        buzzer.off()
+        kirim_segera = True
+        cloud_kirim_segera = True
+        print(">>> BUZZER GAS DIBISUKAN")
+
+    elif line == "CMD:GAS_AUTO":
+        gas_override_mode = "AUTO"
+        buzzer_muted = False
+        kirim_segera = True
+        cloud_kirim_segera = True
+        print(">>> GAS OTOMATIS SENSOR MQ PIN 39")
+
+    elif line == "CMD:GAS_BERSIH":
+        gas_override_mode = "MANUAL"
+        nilai_gas_manual = 650
+        buzzer_muted = False
+        kirim_segera = True
+        cloud_kirim_segera = True
+        print(">>> GAS MANUAL BERSIH (650)")
+
+    elif line == "CMD:GAS_SEDANG":
+        gas_override_mode = "MANUAL"
+        nilai_gas_manual = 1250
+        buzzer_muted = False
+        kirim_segera = True
+        cloud_kirim_segera = True
+        print(">>> GAS MANUAL SEDANG (1250)")
+
+    elif line in ("CMD:GAS_TINGGI", "CMD:GAS_BAHAYA"):
+        gas_override_mode = "MANUAL"
+        nilai_gas_manual = 2100
+        buzzer_muted = False
+        kirim_segera = True
+        cloud_kirim_segera = True
+        print(">>> GAS MANUAL TINGGI (2100)")
+
+    elif line.startswith("CMD:GAS_SET:"):
+        try:
+            nilai_gas_manual = int(line.split(":")[2])
+            gas_override_mode = "MANUAL"
+            buzzer_muted = False
+            kirim_segera = True
+            cloud_kirim_segera = True
+            print(">>> GAS MANUAL SET:", nilai_gas_manual)
+        except Exception as ex:
+            print("[ERR_GAS_SET]", ex)
+
+    elif line.startswith("CMD:WIFI_SET:"):
+        try:
+            payload = line[len("CMD:WIFI_SET:"):]
+            if "|" in payload:
+                ssid_baru, pass_baru = payload.split("|", 1)
+            else:
+                ssid_baru, pass_baru = payload, ""
+            ssid_baru = ssid_baru.strip()
+            if ssid_baru:
+                simpan_wifi_config(ssid_baru, pass_baru)
+        except Exception as ex:
+            print("[ERR_WIFI_SET]", ex)
+
+    elif line == "CMD:WIFI_STATUS":
+        print(
+            "[WIFI STATUS] Connected={} SSID={} IP={}".format(
+                wifi_terhubung, wifi_ssid_aktif, wifi_ip_aktif
+            )
+        )
+
+    elif line == "CMD:WIFI_RESET":
+        try:
+            import os
+            os.remove(WIFI_CONFIG_FILE)
+        except Exception:
+            pass
+        wifi_reconnect_flag = True
+        print(">>> KONFIGURASI WIFI DIHAPUS, MEMBUKA PORTAL AP")
+
+
+def cek_perintah_jaringan():
     while spoll.poll(0):
         try:
             line = sys.stdin.readline().strip()
-
             if not line:
                 break
-
-            print(">>> PERINTAH DITERIMA:", line)
-
-            if line == "CMD:PJU_ON":
-                pju_manual_mode = "ON"
-                kirim_segera = True
-                print(">>> PJU MANUAL ON")
-
-            elif line == "CMD:PJU_OFF":
-                pju_manual_mode = "OFF"
-                kirim_segera = True
-                print(">>> PJU MANUAL OFF")
-
-            elif line == "CMD:PJU_AUTO":
-                pju_manual_mode = "AUTO"
-                ldr_override_mode = "AUTO"
-                kirim_segera = True
-                print(">>> PJU OTOMATIS LDR")
-
-            elif line.startswith("CMD:LDR_SET:"):
-                try:
-                    nilai_ldr_manual = int(line.split(":")[2])
-                    ldr_override_mode = "MANUAL"
-                    kirim_segera = True
-                    print(">>> LDR MANUAL SET:", nilai_ldr_manual)
-                except Exception as ex:
-                    print("[ERR_LDR_SET]", ex)
-
-            elif line in ("CMD:FORCE_CROSSING", "CMD:CROSSING_TRIGGER"):
-                mulai_penyeberangan("WEB DASHBOARD")
-
-            elif line == "CMD:TOUCH_KANAN":
-                mulai_penyeberangan("WEB TOUCH KANAN")
-
-            elif line == "CMD:TOUCH_KIRI":
-                mulai_penyeberangan("WEB TOUCH KIRI")
-
-            elif line == "CMD:CROSSING_RESET":
-                reset_penyeberangan()
-
-            elif line in ("CMD:BUZZER_TEST", "CMD:ALARM_TEST"):
-                buzzer_test_sampai = time.ticks_add(time.ticks_ms(), 300)
-                print(">>> UJI BUZZER SUKSES")
-
-            elif line == "CMD:BUZZER_MUTE":
-                buzzer_muted = True
-                buzzer.off()
-                kirim_segera = True
-                print(">>> BUZZER GAS DIBISUKAN")
-
-            elif line == "CMD:GAS_AUTO":
-                gas_override_mode = "AUTO"
-                buzzer_muted = False
-                kirim_segera = True
-                print(">>> GAS OTOMATIS SENSOR MQ PIN 39")
-
-            elif line == "CMD:GAS_BERSIH":
-                gas_override_mode = "MANUAL"
-                nilai_gas_manual = 650
-                buzzer_muted = False
-                kirim_segera = True
-                print(">>> GAS MANUAL BERSIH (650)")
-
-            elif line == "CMD:GAS_SEDANG":
-                gas_override_mode = "MANUAL"
-                nilai_gas_manual = 1250
-                buzzer_muted = False
-                kirim_segera = True
-                print(">>> GAS MANUAL SEDANG (1250)")
-
-            elif line in ("CMD:GAS_TINGGI", "CMD:GAS_BAHAYA"):
-                gas_override_mode = "MANUAL"
-                nilai_gas_manual = 2100
-                buzzer_muted = False
-                kirim_segera = True
-                print(">>> GAS MANUAL TINGGI (2100)")
-
-            elif line.startswith("CMD:GAS_SET:"):
-                try:
-                    nilai_gas_manual = int(line.split(":")[2])
-                    gas_override_mode = "MANUAL"
-                    buzzer_muted = False
-                    kirim_segera = True
-                    print(">>> GAS MANUAL SET:", nilai_gas_manual)
-                except Exception as ex:
-                    print("[ERR_GAS_SET]", ex)
-
+            eksekusi_perintah(line)
         except Exception as err:
             print("[ERR_CMD]", err)
             break
 
 
 # ==================================================
-# 10. BUZZER DUA FUNGSI: GAS DAN PENYEBERANGAN
+# 10. WORKER WIFI + PORTAL SETUP AP + HTTPS CLOUD SYNC
+# ==================================================
+def kirim_https_post_cloud(body_str):
+    if ssl is None:
+        return None
+    raw_sock = None
+    tls_sock = None
+    try:
+        gc.collect()
+        addr = socket.getaddrinfo(CLOUD_HOST, CLOUD_PORT)[0][-1]
+        raw_sock = socket.socket()
+        raw_sock.settimeout(6)
+        raw_sock.connect(addr)
+        try:
+            tls_sock = ssl.wrap_socket(raw_sock, server_hostname=CLOUD_HOST)
+        except TypeError:
+            tls_sock = ssl.wrap_socket(raw_sock)
+
+        body_bytes = body_str.encode("utf-8")
+        req = (
+            "POST " + CLOUD_PATH + " HTTP/1.1\r\n"
+            "Host: " + CLOUD_HOST + "\r\n"
+            "User-Agent: ESP32-SmartCity\r\n"
+            "Content-Type: application/json\r\n"
+            "Content-Length: " + str(len(body_bytes)) + "\r\n"
+            "Connection: close\r\n\r\n"
+        ).encode("utf-8")
+
+        tls_sock.write(req)
+        tls_sock.write(body_bytes)
+
+        chunks = []
+        total_len = 0
+        while total_len < 8192:
+            data = tls_sock.read(512)
+            if not data:
+                break
+            chunks.append(data)
+            total_len += len(data)
+
+        resp_raw = b"".join(chunks).decode("utf-8", "ignore")
+        sep = resp_raw.find("\r\n\r\n")
+        if sep == -1:
+            return None
+        body_resp = resp_raw[sep + 4:]
+        j_start = body_resp.find("{")
+        j_end = body_resp.rfind("}")
+        if j_start != -1 and j_end > j_start:
+            return ujson.loads(body_resp[j_start:j_end + 1])
+        return None
+    except Exception as e:
+        print("[CLOUD ERR]", e)
+        return None
+    finally:
+        try:
+            if tls_sock is not None:
+                tls_sock.close()
+        except Exception:
+            pass
+        try:
+            if raw_sock is not None:
+                raw_sock.close()
+        except Exception:
+            pass
+        gc.collect()
+
+
+def hubungkan_wifi_sta(sta, daftar_wifi):
+    global wifi_terhubung, wifi_ssid_aktif, wifi_ip_aktif
+
+    sta.active(True)
+    if not daftar_wifi:
+        return False
+
+    for ssid, pwd in daftar_wifi:
+        if not ssid:
+            continue
+        print("[WIFI] Menghubungkan ke:", ssid)
+        tampilkan_pesan_lcd("Hubung Wi-Fi:", ssid, 2000)
+        try:
+            if sta.isconnected():
+                sta.disconnect()
+                time.sleep_ms(200)
+            sta.connect(ssid, pwd)
+        except Exception as e:
+            print("[WIFI CONN ERR]", e)
+            continue
+
+        t0 = time.ticks_ms()
+        while not sta.isconnected() and time.ticks_diff(time.ticks_ms(), t0) < 10000:
+            if wifi_reconnect_flag:
+                return False
+            time.sleep_ms(250)
+
+        if sta.isconnected():
+            wifi_terhubung = True
+            wifi_ssid_aktif = ssid
+            wifi_ip_aktif = sta.ifconfig()[0]
+            print("[WIFI OK] Terhubung ke {} | IP: {}".format(ssid, wifi_ip_aktif))
+            tampilkan_pesan_lcd("WIFI TERHUBUNG", wifi_ip_aktif, 3000)
+            return True
+
+    wifi_terhubung = False
+    wifi_ssid_aktif = ""
+    wifi_ip_aktif = ""
+    return False
+
+
+def jalankan_portal_setup_ap(ap, sta):
+    global wifi_reconnect_flag
+    ap.active(True)
+    try:
+        ap.config(essid=AP_SSID, password=AP_PASS, authmode=3)
+    except Exception:
+        try:
+            ap.config(essid=AP_SSID)
+        except Exception:
+            pass
+
+    print("[WIFI AP] Mode Setup Aktif! Hubungkan HP ke '{}' (sandi: {}) lalu buka http://192.168.4.1".format(AP_SSID, AP_PASS))
+    tampilkan_pesan_lcd("AP:SmartCity", "192.168.4.1", 4000)
+
+    srv = None
+    try:
+        srv = socket.socket()
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("0.0.0.0", 80))
+        srv.listen(2)
+        srv.settimeout(0.5)
+
+        t_retry = time.ticks_ms()
+        while not wifi_reconnect_flag:
+            # Coba ulang Wi-Fi tersimpan setiap 25 detik jika ada
+            if time.ticks_diff(time.ticks_ms(), t_retry) >= 25000:
+                t_retry = time.ticks_ms()
+                daftar = muat_daftar_wifi()
+                if daftar and hubungkan_wifi_sta(sta, daftar):
+                    break
+
+            try:
+                conn, _ = srv.accept()
+            except Exception:
+                continue
+
+            try:
+                conn.settimeout(2)
+                req = conn.recv(1024).decode("utf-8", "ignore")
+                if "GET /save?" in req:
+                    q_start = req.find("?") + 1
+                    q_end = req.find(" ", q_start)
+                    query = req[q_start:q_end] if q_end != -1 else req[q_start:]
+                    ssid_in = ""
+                    pass_in = ""
+                    for pair in query.split("&"):
+                        if pair.startswith("ssid="):
+                            ssid_in = url_decode(pair[5:]).strip()
+                        elif pair.startswith("pass="):
+                            pass_in = url_decode(pair[5:])
+                    if ssid_in:
+                        simpan_wifi_config(ssid_in, pass_in)
+                        html = (
+                            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
+                            "<html><meta name=viewport content='width=device-width,initial-scale=1'>"
+                            "<body style='font-family:sans-serif;padding:24px'>"
+                            "<h2>Wi-Fi Tersimpan!</h2><p>ESP32 sedang menghubungkan ke <b>"
+                            + ssid_in +
+                            "</b> dan akan langsung sinkron ke smartcity-esp32.vercel.app.</p></body></html>"
+                        )
+                        conn.send(html.encode("utf-8"))
+                        conn.close()
+                        break
+                html = (
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
+                    "<html><meta name=viewport content='width=device-width,initial-scale=1'>"
+                    "<body style='font-family:sans-serif;max-width:420px;margin:24px auto;padding:16px'>"
+                    "<h2>SmartCity ESP32 Wi-Fi</h2>"
+                    "<p>Masukkan Wi-Fi 2.4 GHz atau Hotspot HP agar ESP32 terhubung ke dashboard tanpa kabel USB.</p>"
+                    "<form action='/save' method='get'>"
+                    "<label>Nama Wi-Fi (SSID)</label><br>"
+                    "<input name='ssid' required style='width:100%;padding:10px;margin:6px 0 14px'><br>"
+                    "<label>Password Wi-Fi</label><br>"
+                    "<input name='pass' type='password' style='width:100%;padding:10px;margin:6px 0 18px'><br>"
+                    "<button type='submit' style='width:100%;padding:12px;background:#16a34a;color:#fff;border:0;border-radius:8px;font-weight:bold'>Simpan &amp; Hubungkan</button>"
+                    "</form></body></html>"
+                )
+                conn.send(html.encode("utf-8"))
+                conn.close()
+            except Exception:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+    except Exception as e:
+        print("[AP ERR]", e)
+    finally:
+        try:
+            if srv is not None:
+                srv.close()
+        except Exception:
+            pass
+
+
+def worker_wifi_cloud():
+    global wifi_terhubung, wifi_reconnect_flag, cloud_kirim_segera
+
+    sta = network.WLAN(network.STA_IF)
+    ap = network.WLAN(network.AP_IF)
+    ap.active(False)
+    sta.active(True)
+
+    waktu_cloud_terakhir = 0
+
+    while True:
+        try:
+            if wifi_reconnect_flag:
+                wifi_reconnect_flag = False
+                wifi_terhubung = False
+                try:
+                    sta.disconnect()
+                except Exception:
+                    pass
+
+            if not sta.isconnected():
+                wifi_terhubung = False
+                daftar = muat_daftar_wifi()
+                if hubungkan_wifi_sta(sta, daftar):
+                    ap.active(False)
+                    cloud_kirim_segera = True
+                else:
+                    jalankan_portal_setup_ap(ap, sta)
+                    continue
+
+            sekarang_w = time.ticks_ms()
+            if cloud_kirim_segera or time.ticks_diff(sekarang_w, waktu_cloud_terakhir) >= INTERVAL_CLOUD_MS:
+                waktu_cloud_terakhir = sekarang_w
+                cloud_kirim_segera = False
+
+                snap = dict(telemetri_terbaru)
+                pju_on = snap["pjuStatus"] == "MENYALA"
+                paket = {
+                    "deviceId": DEVICE_ID,
+                    "type": "miniature-all",
+                    "payload": {
+                        "gas": {
+                            "gasValue": snap["gas"],
+                            "gasMode": snap["gasMode"],
+                            "statusPolusi": snap["statusPolusi"],
+                        },
+                        "crossing": {
+                            "touchKanan": snap["touchKanan"],
+                            "touchKiri": snap["touchKiri"],
+                            "lampu": snap["lampu"],
+                            "countdown": snap["countdown"],
+                            "buzzer": snap["buzzerSeberang"],
+                            "siapMenyeberang": snap["lampu"] == "NORMAL",
+                        },
+                        "pju": {
+                            "ldrValue": snap["ldr"],
+                            "kondisi": snap["kondisi"],
+                            "pjuStatus": snap["pjuStatus"],
+                            "pjuMode": snap["pjuMode"],
+                            "ledMerah": pju_on,
+                            "ledPutih": pju_on,
+                        },
+                    },
+                }
+
+                resp = kirim_https_post_cloud(ujson.dumps(paket))
+                if isinstance(resp, dict):
+                    cmds = resp.get("commands", [])
+                    if isinstance(cmds, list):
+                        for item in cmds:
+                            if isinstance(item, dict) and item.get("action"):
+                                eksekusi_perintah(str(item.get("action")))
+
+            time.sleep_ms(120)
+        except Exception as err:
+            print("[WIFI LOOP ERR]", err)
+            time.sleep_ms(1000)
+
+
+# ==================================================
+# 11. BUZZER DUA FUNGSI: GAS DAN PENYEBERANGAN
 # ==================================================
 INTERVAL_GAS = 800
 WAKTU_GANTI_MODE = 2500
@@ -341,7 +791,7 @@ def update_buzzer(alarm_gas, alarm_seberang, sekarang):
 
 
 # ==================================================
-# 11. FUNGSI KONTROL KEDUA TRAFFIC LIGHT (BEBAS FLICKER)
+# 12. FUNGSI KONTROL KEDUA TRAFFIC LIGHT (BEBAS FLICKER)
 # ==================================================
 def atur_traffic_light(fase):
     global fase_lampu_aktif
@@ -400,7 +850,7 @@ def hitung_sisa_detik(fase, sekarang):
 
 
 # ==================================================
-# 12. KONDISI AWAL
+# 13. KONDISI AWAL & MULAI WORKER WIFI BACKGROUND
 # ==================================================
 atur_traffic_light("NORMAL")
 buzzer.off()
@@ -419,17 +869,24 @@ INTERVAL_TELEMETRI_MS = 350
 
 print("======================================")
 print(" URBANPULSE SMART CITY - SISTEM AKTIF")
-print(" Sensor Touch + Dual Traffic Light")
+print(" Wi-Fi Cloud + USB Serial + Dual TL")
 print("======================================")
+
+if WIFI_AVAILABLE:
+    try:
+        _thread.start_new_thread(worker_wifi_cloud, ())
+        print("[WIFI] Worker latar belakang aktif (tanpa mengganggu sensor)")
+    except Exception as e:
+        print("[WIFI THREAD ERR]", e)
 
 
 # ==================================================
-# 13. PROGRAM UTAMA (NON-BLOCKING & TEROPTIMASI)
+# 14. PROGRAM UTAMA (NON-BLOCKING & TEROPTIMASI)
 # ==================================================
 while True:
     sekarang = time.ticks_ms()
 
-    # 0. Periksa instruksi kendali dari Web Dashboard
+    # 0. Periksa instruksi kendali dari USB Serial
     cek_perintah_jaringan()
 
     # ----------------------------------------------
@@ -450,14 +907,20 @@ while True:
     if status_polusi != status_polusi_terakhir:
         status_polusi_terakhir = status_polusi
         kirim_segera = True
+        cloud_kirim_segera = True
 
     alarm_gas = (nilai_gas >= BATAS_GAS) and (not buzzer_muted)
 
     # Refresh LCD hanya tiap 350ms dan hanya jika teks berubah (mencegah flicker I2C)
     if lcd is not None and time.ticks_diff(sekarang, waktu_lcd_terakhir) >= INTERVAL_LCD_MS:
         waktu_lcd_terakhir = sekarang
-        baris1 = "Nilai MQ: {:4d}  ".format(nilai_gas)
-        baris2 = "{:<16}".format(status_polusi[:16])
+        if lcd_pesan_sementara_sampai != 0 and time.ticks_diff(lcd_pesan_sementara_sampai, sekarang) > 0:
+            baris1 = lcd_pesan_baris1
+            baris2 = lcd_pesan_baris2
+        else:
+            baris1 = "Nilai MQ: {:4d}  ".format(nilai_gas)
+            baris2 = "{:<16}".format(status_polusi[:16])
+
         if baris1 != lcd_baris1_terakhir or baris2 != lcd_baris2_terakhir:
             try:
                 lcd.move_to(0, 0)
@@ -481,6 +944,7 @@ while True:
 
     if touch_kanan_aktif != touch_kanan_sebelumnya or touch_kiri_aktif != touch_kiri_sebelumnya:
         kirim_segera = True
+        cloud_kirim_segera = True
 
     touch_kanan_sebelumnya = touch_kanan_aktif
     touch_kiri_sebelumnya = touch_kiri_aktif
@@ -503,6 +967,7 @@ while True:
             fase_penyeberangan = "KUNING_PEJALAN"
             waktu_fase = sekarang
             kirim_segera = True
+            cloud_kirim_segera = True
             print(">>> KENDARAAN MERAH, PEJALAN KAKI KUNING")
 
     elif fase_penyeberangan == "KUNING_PEJALAN":
@@ -510,6 +975,7 @@ while True:
             fase_penyeberangan = "MENYEBRANG"
             waktu_fase = sekarang
             kirim_segera = True
+            cloud_kirim_segera = True
             print(">>> PEJALAN KAKI HIJAU - SILAKAN MENYEBRANG")
 
     elif fase_penyeberangan == "MENYEBRANG":
@@ -517,6 +983,7 @@ while True:
             fase_penyeberangan = "KUNING_PENUTUP"
             waktu_fase = sekarang
             kirim_segera = True
+            cloud_kirim_segera = True
             print(">>> WAKTU MENYEBRANG SELESAI")
 
     elif fase_penyeberangan == "KUNING_PENUTUP":
@@ -524,6 +991,7 @@ while True:
             fase_penyeberangan = "NORMAL"
             waktu_fase = sekarang
             kirim_segera = True
+            cloud_kirim_segera = True
             print(">>> KEMBALI KE KONDISI NORMAL")
 
     atur_traffic_light(fase_penyeberangan)
@@ -570,6 +1038,23 @@ while True:
     if status_pju != status_pju_terakhir:
         status_pju_terakhir = status_pju
         kirim_segera = True
+        cloud_kirim_segera = True
+
+    sisa_detik = hitung_sisa_detik(fase_penyeberangan, sekarang)
+
+    # Perbarui snapshot untuk worker Wi-Fi Cloud
+    telemetri_terbaru["gas"] = nilai_gas
+    telemetri_terbaru["gasMode"] = gas_override_mode
+    telemetri_terbaru["statusPolusi"] = status_polusi
+    telemetri_terbaru["touchKanan"] = touch_kanan_aktif
+    telemetri_terbaru["touchKiri"] = touch_kiri_aktif
+    telemetri_terbaru["lampu"] = fase_penyeberangan
+    telemetri_terbaru["countdown"] = sisa_detik
+    telemetri_terbaru["buzzerSeberang"] = alarm_seberang
+    telemetri_terbaru["ldr"] = nilai_ldr
+    telemetri_terbaru["kondisi"] = kondisi_pju
+    telemetri_terbaru["pjuStatus"] = status_pju
+    telemetri_terbaru["pjuMode"] = pju_manual_mode
 
     # ----------------------------------------------
     # FITUR 6: KIRIM JSON & LOG RINGKAS (TIAP 350ms ATAU SAAT BERUBAH)
@@ -577,7 +1062,6 @@ while True:
     if kirim_segera or time.ticks_diff(sekarang, waktu_telemetri_terakhir) >= INTERVAL_TELEMETRI_MS:
         waktu_telemetri_terakhir = sekarang
         kirim_segera = False
-        sisa_detik = hitung_sisa_detik(fase_penyeberangan, sekarang)
 
         print(
             '[JSON]{'
@@ -597,12 +1081,14 @@ while True:
             '"ldr":' + str(nilai_ldr) + ','
             '"kondisi":"' + kondisi_pju + '",'
             '"pjuStatus":"' + status_pju + '",'
-            '"pjuMode":"' + pju_manual_mode + '"'
+            '"pjuMode":"' + pju_manual_mode + '",'
+            '"wifi":' + ("true" if wifi_terhubung else "false") + ','
+            '"wifiIp":"' + wifi_ip_aktif + '"'
             '}'
         )
 
         print(
-            "[STATUS] Gas:{} ({}) | Touch R:{} L:{} | Fase:{} ({}s) | PJU:{} ({})".format(
+            "[STATUS] Gas:{} ({}) | Touch R:{} L:{} | Fase:{} ({}s) | PJU:{} ({}) | WiFi:{}".format(
                 nilai_gas,
                 status_polusi,
                 1 if touch_kanan_aktif else 0,
@@ -611,6 +1097,7 @@ while True:
                 sisa_detik,
                 status_pju,
                 pju_manual_mode,
+                wifi_ip_aktif if wifi_terhubung else "AP/OFF",
             )
         )
 
