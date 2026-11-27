@@ -1233,7 +1233,7 @@ export const SmartCityProvider = ({ children }: { children: ReactNode }) => {
         if (!isMounted || !data.latestBySubsystem) return;
 
         const now = Date.now();
-        const mqttFresh = now - lastMqttRxTimeRef.current < 8000;
+        const mqttFresh = now - lastMqttRxTimeRef.current < 15000;
         let espDataFresh = isSerialConnected || mqttFresh;
         let camDataFresh = false;
 

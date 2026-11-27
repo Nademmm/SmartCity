@@ -37,12 +37,15 @@ WIFI_CONFIG_FILE = "wifi_config.json"
 AP_SSID = "SmartCity-ESP32-Setup"
 AP_PASS = "12345678"
 
-CLOUD_HOST = "broker.emqx.io"
-CLOUD_PORT = 1883
+# Dual-Broker Failover: otomatis pindah broker jika salah satu sibuk/putus
+MQTT_BROKERS = [
+    ("broker.hivemq.com", 1883),
+    ("broker.emqx.io", 1883),
+]
 MQTT_TOPIC_TELEMETRY = "urbanpulse/smartcity-esp32-nadem-2026/telemetry"
 MQTT_TOPIC_CMD = "urbanpulse/smartcity-esp32-nadem-2026/cmd"
 DEVICE_ID = "ESP32-MINIATURE"
-INTERVAL_CLOUD_MS = 500
+INTERVAL_CLOUD_MS = 1800
 
 # ==================================================
 # 1. LCD I2C (AUTO-DETEKSI SCL & SDA)
@@ -443,18 +446,25 @@ def mqtt_encode_str(s):
     return len(b).to_bytes(2, "big") + b
 
 
-def mqtt_buka_koneksi():
+def mqtt_buka_koneksi(broker_idx):
+    host, port = MQTT_BROKERS[broker_idx % len(MQTT_BROKERS)]
     sock = None
     try:
         gc.collect()
-        addr = socket.getaddrinfo(CLOUD_HOST, CLOUD_PORT, socket.AF_INET)[0][-1]
+        addr = socket.getaddrinfo(host, port, socket.AF_INET)[0][-1]
         sock = socket.socket()
         sock.settimeout(5)
         sock.connect(addr)
 
-        # MQTT 3.1.1 CONNECT (Clean Session, KeepAlive 60s)
-        cid = "esp32_sc_" + str(time.ticks_ms() % 100000)
-        vh = b"\x00\x04MQTT\x04\x02\x00\x3c"
+        # Client ID unik berbasis MAC + ticks agar tidak pernah ditendang broker
+        try:
+            import machine, ubinascii
+            uid = ubinascii.hexlify(machine.unique_id()).decode()[-6:]
+        except Exception:
+            uid = "esp32"
+        cid = "sc_" + uid + "_" + str(time.ticks_ms() % 100000)
+        # MQTT 3.1.1 CONNECT (Clean Session, KeepAlive 45s)
+        vh = b"\x00\x04MQTT\x04\x02\x00\x2d"
         pl = mqtt_encode_str(cid)
         pkt = b"\x10" + mqtt_encode_varint(len(vh) + len(pl)) + vh + pl
         sock.send(pkt)
@@ -468,35 +478,39 @@ def mqtt_buka_koneksi():
         sub_pkt = b"\x82" + mqtt_encode_varint(len(sub_vh) + len(sub_pl)) + sub_vh + sub_pl
         sock.send(sub_pkt)
         sock.settimeout(0.08)
-        print("[CLOUD OK] MQTT Real-Time terhubung ke", CLOUD_HOST)
-        return sock
+        print("[CLOUD OK] MQTT Real-Time terhubung ke", host)
+        return sock, host
     except Exception as e:
-        print("[CLOUD ERR]", e)
+        print("[CLOUD ERR]", host, e)
         try:
             if sock is not None:
                 sock.close()
         except Exception:
             pass
-        return None
+        return None, ""
 
 
 def mqtt_publish_json(sock, topic, payload_str):
     tb = mqtt_encode_str(topic)
     pb = payload_str.encode("utf-8")
-    pkt = b"\x30" + mqtt_encode_varint(len(tb) + len(pb)) + tb + pb
+    # 0x31 = PUBLISH QoS 0 + RETAIN=1 (HP yang baru buka web langsung menerima data terbaru 0ms!)
+    pkt = b"\x31" + mqtt_encode_varint(len(tb) + len(pb)) + tb + pb
     sock.send(pkt)
 
 
 def mqtt_proses_masuk(sock, buf):
+    got_pong = False
     try:
         chunk = sock.recv(512)
         if chunk == b"":
-            return None, False
+            return None, False, False
         if chunk:
             buf += chunk
-    except OSError:
-        # Timeout 80ms normal saat tidak ada pesan baru
-        pass
+    except OSError as e:
+        # Hanya abaikan timeout normal (EAGAIN=11 / ETIMEDOUT=116); error putus (ECONNRESET=104 dll) wajib reconnect!
+        errno_val = e.args[0] if e.args else 0
+        if errno_val not in (11, 116):
+            return None, False, False
 
     while len(buf) >= 2:
         hdr = buf[0]
@@ -518,7 +532,10 @@ def mqtt_proses_masuk(sock, buf):
         body = buf[idx:idx + rem_len]
         buf = buf[idx + rem_len:]
 
-        if (hdr & 0xF0) == 0x30 and len(body) >= 2:
+        pkt_type = hdr & 0xF0
+        if pkt_type == 0xD0:
+            got_pong = True
+        elif pkt_type == 0x30 and len(body) >= 2:
             tlen = (body[0] << 8) | body[1]
             qos = (hdr >> 1) & 0x03
             pstart = 2 + tlen + (2 if qos > 0 else 0)
@@ -527,7 +544,7 @@ def mqtt_proses_masuk(sock, buf):
                 if cmd_str:
                     eksekusi_perintah(cmd_str)
 
-    return buf, True
+    return buf, True, got_pong
 
 
 def hubungkan_wifi_sta(sta, daftar_wifi):
@@ -748,8 +765,10 @@ def worker_wifi_cloud():
 
     mqtt_sock = None
     mqtt_buf = b""
+    broker_idx = 0
     waktu_cloud_terakhir = 0
     waktu_ping_terakhir = 0
+    menunggu_pong_sejak = 0
 
     while True:
         try:
@@ -784,32 +803,45 @@ def worker_wifi_cloud():
                     continue
 
             if mqtt_sock is None:
-                mqtt_sock = mqtt_buka_koneksi()
+                mqtt_sock, _ = mqtt_buka_koneksi(broker_idx)
                 mqtt_buf = b""
+                menunggu_pong_sejak = 0
                 if mqtt_sock is None:
-                    time.sleep_ms(2000)
+                    broker_idx = (broker_idx + 1) % len(MQTT_BROKERS)
+                    time.sleep_ms(1500)
                     continue
                 waktu_ping_terakhir = time.ticks_ms()
                 cloud_kirim_segera = True
 
-            # 1. Baca perintah masuk dari Web Dashboard (non-blocking 80ms)
-            mqtt_buf, hidup = mqtt_proses_masuk(mqtt_sock, mqtt_buf)
+            # 1. Baca perintah masuk & PINGRESP dari broker (non-blocking 80ms)
+            mqtt_buf, hidup, got_pong = mqtt_proses_masuk(mqtt_sock, mqtt_buf)
+            if got_pong:
+                menunggu_pong_sejak = 0
+
+            sekarang_w = time.ticks_ms()
+
+            # Jika PINGREQ tidak dibalas dalam 6 detik, anggap koneksi zombie -> pindah broker/reconnect!
+            if menunggu_pong_sejak != 0 and time.ticks_diff(sekarang_w, menunggu_pong_sejak) > 6000:
+                print("[CLOUD WARN] Timeout PINGRESP, menghubungkan ulang...")
+                hidup = False
+
             if not hidup:
                 try:
                     mqtt_sock.close()
                 except Exception:
                     pass
                 mqtt_sock = None
+                broker_idx = (broker_idx + 1) % len(MQTT_BROKERS)
                 continue
 
-            sekarang_w = time.ticks_ms()
-
-            # 2. KeepAlive PING setiap 20 detik
-            if time.ticks_diff(sekarang_w, waktu_ping_terakhir) >= 20000:
+            # 2. KeepAlive PING setiap 15 detik
+            if time.ticks_diff(sekarang_w, waktu_ping_terakhir) >= 15000:
                 waktu_ping_terakhir = sekarang_w
                 mqtt_sock.send(b"\xc0\x00")
+                if menunggu_pong_sejak == 0:
+                    menunggu_pong_sejak = sekarang_w
 
-            # 3. Kirim telemetri real-time setiap 500ms atau langsung saat status berubah
+            # 3. Kirim telemetri setiap 1.8 detik atau LANGSUNG saat ada perubahan sensor/lampu/PJU
             if cloud_kirim_segera or time.ticks_diff(sekarang_w, waktu_cloud_terakhir) >= INTERVAL_CLOUD_MS:
                 waktu_cloud_terakhir = sekarang_w
                 cloud_kirim_segera = False
@@ -826,6 +858,7 @@ def worker_wifi_cloud():
                 except Exception:
                     pass
                 mqtt_sock = None
+            broker_idx = (broker_idx + 1) % len(MQTT_BROKERS)
             time.sleep_ms(1000)
 
 
